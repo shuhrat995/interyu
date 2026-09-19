@@ -29,6 +29,12 @@ AI Intervyu — bilim sinash platformasi (Next.js 14 + Prisma + Gemini AI).
 
 ## Lokal ishga tushirish
 
+> **Push qilish (birinchi marta):** commit tayyor (`git log` da ko'rinadi). Faqat:
+> ```bash
+> git push -u origin main
+> ```
+> GitHub username/token so'rsa — [Personal Access Token](https://github.com/settings/tokens) yarating (scope: `repo`) va parol o'rniga shuni kiriting.
+
 ## Ishga tushirish
 
 ```bash
