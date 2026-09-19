@@ -1,0 +1,14 @@
+node_modules
+.next
+.env
+.env.local
+.env*.local
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+prisma/dev.db*
+.DS_Store
+tsconfig.tsbuildinfo
+.vercel
+.freebuff/

@@ -1,0 +1,226 @@
+// AI Intervyu — 1-bosqich sxemasi (vaqtincha SQLite; PostgreSQL'ga ko'chish uchun tayyor)
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model AdminUser {
+  id               String   @id @default(cuid())
+  email            String   @unique
+  name             String
+  passwordHash     String
+  role             String   @default("viewer") // super_admin | admin | recruiter | editor | viewer
+  mustChangePass   Boolean  @default(false)
+  isActive         Boolean  @default(true)
+  failedAttempts   Int      @default(0)
+  lockedUntil      DateTime?
+  lastLoginAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  auditLogs         AuditLog[]
+  promptVersions    PromptVersion[]
+  questionVersions  QuestionVersion[] @relation("EditedBy")
+  interviewNotes    InterviewNote[]
+}
+
+model Topic {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  parentId  String?
+  color     String   @default("#6d8cff")
+  icon      String?
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parent   Topic?    @relation("TopicTree", fields: [parentId], references: [id])
+  children Topic[]   @relation("TopicTree")
+  questions Question[]
+
+  @@index([parentId])
+}
+
+model Question {
+  id          String   @id @default(cuid())
+  topicId     String
+  type        String   // mcq | written
+  difficulty  Int      // 0..5
+  text        String
+  optionsJson String?  // MCQ variantlari (JSON massiv)
+  correctIndex Int?
+  rubric      String?
+  keywords    String   @default("") // vergul bilan
+  timeLimit   Int      @default(180) // sekund
+  isActive    Boolean  @default(true)
+  deletedAt   DateTime? // soft delete
+  version     Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  topic    Topic             @relation(fields: [topicId], references: [id])
+  versions QuestionVersion[] @relation("QuestionRef")
+  answers  Answer[]
+
+  @@index([topicId])
+  @@index([type, difficulty])
+  @@index([deletedAt])
+}
+
+model QuestionVersion {
+  id           String   @id @default(cuid())
+  questionId   String
+  version      Int
+  snapshotJson String   // to'liq savol nusxasi (before)
+  action       String   // create | update | delete | restore
+  editedById   String?
+  createdAt    DateTime @default(now())
+
+  question  Question   @relation("QuestionRef", fields: [questionId], references: [id])
+  editedBy  AdminUser? @relation("EditedBy", fields: [editedById], references: [id])
+
+  @@index([questionId])
+}
+
+model AICallLog {
+  id          String   @id @default(cuid())
+  provider    String   // gemini | openai | mock
+  model       String
+  kind        String   // evaluate_written | final_report | rubric | keywords | distractors
+  promptChars Int
+  status      String   // ok | error
+  errorText   String?
+  inputTokens Int?
+  outputTokens Int?
+  latencyMs   Int?
+  createdAt   DateTime @default(now())
+
+  @@index([kind])
+  @@index([createdAt])
+}
+
+model PromptVersion {
+  id        String   @id @default(cuid())
+  kind      String   // evaluate_written | final_report
+  version   Int
+  template  String
+  isActive  Boolean  @default(false)
+  createdById String?
+  createdAt DateTime @default(now())
+
+  createdBy AdminUser? @relation(fields: [createdById], references: [id])
+
+  @@index([kind])
+}
+
+/// Tashrif analitikasi (server tomonda loglanadi, botlar filtrlanadi)
+model VisitorEvent {
+  id        String   @id @default(cuid())
+  path      String // "/", "/interview"...
+  visitorId String // brauzer cookie hash (90 kun)
+  kind      String   @default("view") // view | interview_start | interview_finish | admin_login
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([visitorId, createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  entity     String
+  entityId   String?
+  beforeJson String?
+  afterJson  String?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  actor AdminUser? @relation(fields: [actorId], references: [id])
+
+  @@index([createdAt])
+  @@index([entity, entityId])
+  @@index([actorId])
+}
+
+model SystemSetting {
+  key       String   @id
+  valueJson String
+  updatedAt DateTime @updatedAt
+}
+
+// --- Nomzod tomoni (TZ §3.3, 2-bosqichga tayyor) ---
+
+model Interview {
+  id                String    @id @default(cuid())
+  candidateName     String
+  status            String    @default("in_progress") // in_progress | finished | abandoned
+  track             String?   // frontend | backend — nomzod tanlagan yo'nalish
+  settingsJson      String?   // sessiya boshidagi sozlamalar snapshot
+  currentLevel      Int       @default(0)
+  askedIdsJson      String    @default("[]")
+  correctStreak     Int       @default(0) // ketma-ket to'g'ri hisoblagich (adaptiv)
+  currentQuestionId String?   // hozir ko'rsatilgan savol (server nazorati)
+  currentServedAt   DateTime? // savol berilgan vaqt (server timer)
+  antiCheatJson     String    @default("[]") // visibilitychange va b. hodisalar
+  aiReportJson      String?
+  startedAt         DateTime  @default(now())
+  finishedAt        DateTime?
+
+  answers Answer[]
+  notes   InterviewNote[]
+  tags    InterviewTag[]
+}
+
+model InterviewNote {
+  id          String   @id @default(cuid())
+  interviewId String
+  authorId    String?  // AdminUser
+  body        String
+  createdAt   DateTime @default(now())
+
+  interview Interview  @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  author    AdminUser? @relation(fields: [authorId], references: [id])
+
+  @@index([interviewId])
+}
+
+model InterviewTag {
+  id          String @id @default(cuid())
+  interviewId String
+  label       String
+  color       String @default("#6d8cff")
+
+  interview Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+
+  @@unique([interviewId, label])
+  @@index([interviewId])
+}
+
+model Answer {
+  id              String   @id @default(cuid())
+  interviewId     String
+  questionId      String
+  questionVersion Int      @default(1) // eski intervyular eski versiyaga bog'lanadi
+  selectedIndex   Int?
+  answerText      String?
+  isCorrect       Boolean?
+  aiScore         Int?
+  aiResultJson    String?
+  timeSpent       Int      @default(0) // sekund
+  createdAt       DateTime @default(now())
+
+  interview Interview @relation(fields: [interviewId], references: [id])
+  question  Question  @relation(fields: [questionId], references: [id])
+
+  @@unique([interviewId, questionId]) // bir savolga bitta javob (TZ 5.3.5)
+  @@index([interviewId])
+  @@index([questionId])
+}
