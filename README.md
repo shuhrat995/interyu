@@ -146,3 +146,5 @@ Xato mezoni: MCQ `isCorrect === false` yoki yozma `aiScore < 40`.
 4. ~~2D — Admin'da intervyu natijalari ro'yxati va transkript ko'rinishi~~ ✅ (qilingan)
 5. ~~2E — Analitika grafiklari (Recharts)~~ ✅ (qilingan)
 6. **3-bosqich** — PDF eksport (analitika tayyor)
+
+# interyu
