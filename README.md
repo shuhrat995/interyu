@@ -47,16 +47,16 @@ npm run dev             # http://localhost:3000
 
 Baza bo'sh bo'lsa `/login` avtomatik **Bootstrap** formasini ko'rsatadi — birinchi super_admin shu yerda yaratiladi.
 
-> Dev kirim: `admin@example.com` / `admin12345`. O'z kirim uchun `.env` ni to'ldiring.
+> Dev kirim: `admin@example.com` / `2008.07`. O'z kirim uchun `.env` ni to'ldiring.
 
 ## Kirim ma'lumotlari
 
 | Ro'l | Kirim |
 |---|---|
-| super_admin | admin@example.com / admin12345 |
+| super_admin | admin@example.com / 2008.07 |
 | Boshqalar | bootstrap yoki super_admin yaratadi |
 
-Kirim **email + parol** asosida (`POST /api/auth/login`); sessiya JWT httpOnly cookie (8 soat). 5 xato urinish → 15 daqiqa blok, har urinish audit logda. >2FA ataylab olib tashlangan — keyinroq qayta qo'shish mumkin.
+Kirim **email + parol** asosida (`POST /api/auth/login`); sessiya JWT httpOnly cookie (8 soat). Email+IP bo'yicha 3 xato → 5 daqiqa, 6 xato → 10 daqiqa, 9 xato → 1 hafta blok. To'g'ri parol blok holatida ham kirishga ruxsat beradi. >2FA ataylab olib tashlangan — keyinroq qayta qo'shish mumkin.
 
 ## Texnologiyalar
 
@@ -69,7 +69,7 @@ Kirim **email + parol** asosida (`POST /api/auth/login`); sessiya JWT httpOnly c
 
 ## Modullar
 
-- **Auth**: bootstrap (baza bo'sh bo'lsa) → login (email + parol), 5 xato login → 15 daqiqa blok; RBAC 5 rol
+- **Auth**: bootstrap (baza bo'sh bo'lsa) → login (email + parol), email+IP bo'yicha bosqichli blok; RBAC 5 rol
 - **Dashboard**: savollar/mavzular/adminlar/audit sonlari, daraja taqsimoti, so'nggi harakatlar
 - **Savollar**: MCQ (2–5 variant, 1 to'g'ri) + yozma (rubric ≥30 belgi, kalit so'zlar), daraja 0–5, vaqt limiti 30–900s
   - Ishlatilgan savol tahrirlansa **yangi versiya** yaratiladi (eski intervyular eski versiyaga bog'lanadi)
@@ -89,7 +89,7 @@ Kirim **email + parol** asosida (`POST /api/auth/login`); sessiya JWT httpOnly c
 - [x] AC-A05 Ishlatilgan savol yangi versiya
 - [ ] AC-A06 AI prompt versiyalar + A/B (promptlar seed qilingan, UI 1D bosqichi)
 - [ ] AC-A07 Token sarf monitoring (1D)
-- [x] AC-A08 5 xato login → 15 daqiqa blok
+- [x] AC-A08 Email+IP bo'yicha bosqichli login bloklash
 - [x] AC-A09 Audit log
 - [x] AC-A10 139 savol + 2 prompt
   - 59 asosiy (JavaScript/TS/React/API/DB/Algoritmlar, har darajada 9–11, MCQ+yozma)

@@ -7,18 +7,19 @@ import { signSession, sessionCookieOptions, COOKIE_NAME } from "@/lib/auth";
 import { logVisit } from "@/lib/analytics";
 import {
   getUserByEmail,
-  isLocked,
   registerFailedLogin,
+  registerFailedLoginVirtual,
   registerSuccessfulLogin,
-  requireSetup
+  requireSetup,
+  getRequestIp,
+  isThrottleLocked
 } from "@/lib/loginGuard";
 
 const bootstrapSchema = z.object({
   email: z.string().email(),
   name: z.string().min(2).max(80),
-  password: z.string().min(8)
+  password: z.string().min(6)
 });
-
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1)
@@ -26,7 +27,7 @@ const loginSchema = z.object({
 
 const changeSchema = z.object({
   current: z.string().min(1),
-  next: z.string().min(8)
+  next: z.string().min(6)
 });
 
 export async function POST(req: NextRequest) {
@@ -53,22 +54,25 @@ export async function POST(req: NextRequest) {
     const parsed = await parseBody(req, loginSchema);
     if (!parsed.ok) return parsed.res;
     const { email, password } = parsed.data;
+    const ip = getRequestIp(req);
     const user = await getUserByEmail(email);
     if (!user || !user.isActive) {
-      await registerFailedLoginVirtual(req, email);
+      if (await isThrottleLocked(email, ip)) {
+        return jsonError(429, "Kirish vaqtincha bloklangan. Keyinroq urinib ko'ring");
+      }
+      await registerFailedLoginVirtual(email, ip);
+      await audit(req, null, "login_failed_unknown", "admin_user", null, null, { email });
       return jsonError(401, "Email yoki parol xato");
-    }
-    if (await isLocked(user)) {
-      const mins = user.lockedUntil ? Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000) : 15;
-      return jsonError(429, `Hisob bloklangan. ${mins} daqiqadan keyin urinib ko'ring`);
     }
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) {
-      await registerFailedLogin(user);
+      await registerFailedLogin(user, email, ip);
       await audit(req, user.id, "login_failed", "admin_user", user.id);
-      return jsonError(401, "Email yoki parol xato");
+      const attempts = user.failedAttempts + 1;
+      const mins = attempts >= 9 ? 7 * 24 * 60 : attempts >= 6 ? 10 : attempts >= 3 ? 5 : 0;
+      return jsonError(mins ? 429 : 401, mins ? `Hisob bloklandi. ${mins >= 1440 ? "1 hafta" : `${mins} daqiqa`}dan keyin urinib ko'ring` : "Email yoki parol xato");
     }
-    await registerSuccessfulLogin(user.id);
+    await registerSuccessfulLogin(user.id, email, ip);
     const token = await signSession({
       sub: user.id,
       email: user.email,
@@ -103,6 +107,3 @@ export const PUT = withAuth(async ({ req, session }) => {
   return NextResponse.json({ ok: true });
 });
 
-async function registerFailedLoginVirtual(req: NextRequest, email: string) {
-  await audit(req, null, "login_failed_unknown", "admin_user", null, null, { email });
-}

@@ -28,6 +28,18 @@ model AdminUser {
   interviewNotes    InterviewNote[]
 }
 
+model LoginThrottle {
+  id             String   @id @default(cuid())
+  key            String   @unique
+  email          String
+  ip             String
+  failedAttempts Int      @default(0)
+  lockedUntil    DateTime?
+  updatedAt      DateTime @updatedAt
+
+  @@index([email, ip])
+}
+
 model Topic {
   id        String   @id @default(cuid())
   name      String
