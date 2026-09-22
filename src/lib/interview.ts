@@ -89,28 +89,20 @@ export async function pickNextQuestion(level: number, askedIds: string[], topicS
       where: {
         deletedAt: null,
         isActive: true,
-        type: "written",
         difficulty: lv,
         id: { notIn: askedIds },
         ...topicFilter
       },
       orderBy: { createdAt: "asc" },
-      take: 5
+      take: 10
     });
     if (candidates.length > 0) {
       return candidates[Math.floor(Math.random() * candidates.length)];
     }
   }
-  // yozma tugagan bo'lsa MCQ bilan to'ldirish
-  for (const lv of [level, level + 1, level - 1, 0, 1, 2, 3, 4, 5]) {
-    if (lv < 0 || lv > 5) continue;
-    const candidates = await prisma.question.findMany({
-      where: { deletedAt: null, isActive: true, type: "mcq", difficulty: lv, id: { notIn: askedIds }, ...topicFilter },
-      take: 3
-    });
-    if (candidates.length > 0) {
-      return candidates[Math.floor(Math.random() * candidates.length)];
-    }
+  // fallback: ignore topic filter if no questions found for track
+  if (topicSlugs && topicSlugs.length > 0) {
+    return pickNextQuestion(level, askedIds, undefined);
   }
   return null;
 }
