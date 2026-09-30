@@ -100,10 +100,6 @@ export async function pickNextQuestion(level: number, askedIds: string[], topicS
       return candidates[Math.floor(Math.random() * candidates.length)];
     }
   }
-  // fallback: ignore topic filter if no questions found for track
-  if (topicSlugs && topicSlugs.length > 0) {
-    return pickNextQuestion(level, askedIds, undefined);
-  }
   return null;
 }
 
