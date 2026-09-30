@@ -262,7 +262,18 @@ export default function InterviewPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim(), track: trackSlug })
       });
-      const j = await res.json();
+      let j: {
+        error?: string;
+        interviewId: string;
+        track?: TrackSlug;
+        question: NonNullable<typeof question>;
+      };
+      try {
+        j = await res.json();
+      } catch {
+        setError(res.ok ? "Serverdan noto'g'ri javob keldi" : `Server xatosi (${res.status})`);
+        return;
+      }
       if (!res.ok) {
         setError(j.error || "Xatolik");
         return;
@@ -276,6 +287,8 @@ export default function InterviewPage() {
       setLevel(0);
       questionStart.current = Date.now();
       setPhase("question");
+    } catch {
+      setError("Serverga ulanib bo'lmadi. Qayta urinib ko'ring.");
     } finally {
       setBusy(false);
       setPendingTrack(null);
