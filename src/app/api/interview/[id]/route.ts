@@ -4,55 +4,60 @@ import { jsonError } from "@/lib/api";
 import { getSettings, parseAskedIds, toServed } from "@/lib/interview";
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const { id } = await ctx.params;
-  const interview = await prisma.interview.findUnique({
-    where: { id },
-    include: {
-      answers: { select: { questionId: true, isCorrect: true, aiScore: true } }
-    }
-  });
-  if (!interview) return jsonError(404, "Sessiya topilmadi");
+  try {
+    const { id } = await ctx.params;
+    const interview = await prisma.interview.findUnique({
+      where: { id },
+      include: {
+        answers: { select: { questionId: true, isCorrect: true, aiScore: true } }
+      }
+    });
+    if (!interview) return jsonError(404, "Sessiya topilmadi");
 
-  const settings = await getSettings();
-  const answered = interview.answers.length;
+    const settings = await getSettings();
+    const answered = interview.answers.length;
 
-  if (interview.status !== "in_progress") {
-    let report = null;
-    try {
-      report = interview.aiReportJson ? JSON.parse(interview.aiReportJson) : null;
-    } catch {
-      report = null;
+    if (interview.status !== "in_progress") {
+      let report = null;
+      try {
+        report = interview.aiReportJson ? JSON.parse(interview.aiReportJson) : null;
+      } catch {
+        report = null;
+      }
+      return NextResponse.json({
+        status: interview.status,
+        candidateName: interview.candidateName,
+        track: interview.track,
+        stack: interview.stack ?? null,
+        answered,
+        total: settings.totalQuestions,
+        question: null,
+        report
+      });
     }
+
+    // Joriy savolni qaytarish (javob berilmagan)
+    let question = null;
+    if (interview.currentQuestionId) {
+      const q = await prisma.question.findUnique({ where: { id: interview.currentQuestionId } });
+      if (q) {
+        question = { ...toServed(q, answered + 1, settings.totalQuestions), servedAt: interview.currentServedAt?.toISOString() ?? null };
+      }
+    }
+
     return NextResponse.json({
       status: interview.status,
       candidateName: interview.candidateName,
       track: interview.track,
       stack: interview.stack ?? null,
+      currentLevel: interview.currentLevel,
       answered,
       total: settings.totalQuestions,
-      question: null,
-      report
+      question,
+      report: null
     });
+  } catch (err) {
+    console.error("Interview GET [id] error:", err);
+    return jsonError(500, "Server xatosi");
   }
-
-  // Joriy savolni qaytarish (javob berilmagan)
-  let question = null;
-  if (interview.currentQuestionId) {
-    const q = await prisma.question.findUnique({ where: { id: interview.currentQuestionId } });
-    if (q) {
-      question = { ...toServed(q, answered + 1, settings.totalQuestions), servedAt: interview.currentServedAt?.toISOString() ?? null };
-    }
-  }
-
-  return NextResponse.json({
-    status: interview.status,
-    candidateName: interview.candidateName,
-    track: interview.track,
-    stack: interview.stack ?? null,
-    currentLevel: interview.currentLevel,
-    answered,
-    total: settings.totalQuestions,
-    question,
-    report: null
-  });
 }

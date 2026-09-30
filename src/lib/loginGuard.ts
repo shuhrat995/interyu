@@ -39,30 +39,43 @@ export async function registerFailedLogin(
     where: { id: user.id },
     data: { failedAttempts: attempts, lockedUntil }
   });
-  const key = throttleKey(email, ip);
-  await prisma.loginThrottle.upsert({
-    where: { key },
-    create: { key, email: email.toLowerCase().trim(), ip, failedAttempts: 1, lockedUntil },
-    update: { failedAttempts: { increment: 1 }, lockedUntil }
-  });
+  try {
+    const key = throttleKey(email, ip);
+    await prisma.loginThrottle.upsert({
+      where: { key },
+      create: { key, email: email.toLowerCase().trim(), ip, failedAttempts: 1, lockedUntil },
+      update: { failedAttempts: { increment: 1 }, lockedUntil }
+    });
+  } catch (err) {
+    console.warn("registerFailedLogin loginThrottle.upsert error (ignored):", err);
+  }
 }
 
 export async function isThrottleLocked(email: string, ip: string) {
-  const throttle = await prisma.loginThrottle.findUnique({ where: { key: throttleKey(email, ip) } });
-  return Boolean(throttle?.lockedUntil && throttle.lockedUntil > new Date());
+  try {
+    const throttle = await prisma.loginThrottle.findUnique({ where: { key: throttleKey(email, ip) } });
+    return Boolean(throttle?.lockedUntil && throttle.lockedUntil > new Date());
+  } catch (err) {
+    console.warn("isThrottleLocked error (ignored):", err);
+    return false;
+  }
 }
 
 export async function registerFailedLoginVirtual(email: string, ip: string) {
-  const key = throttleKey(email, ip);
-  const throttle = await prisma.loginThrottle.upsert({
-    where: { key },
-    create: { key, email: email.toLowerCase().trim(), ip, failedAttempts: 1 },
-    update: { failedAttempts: { increment: 1 } }
-  });
-  const attempts = throttle.failedAttempts;
-  if (attempts >= 3) {
-    const minutes = attempts >= 9 ? 7 * 24 * 60 : LOCK_DURATIONS[Math.min(Math.floor(attempts / 3) - 1, 2)];
-    await prisma.loginThrottle.update({ where: { key }, data: { lockedUntil: new Date(Date.now() + minutes * 60 * 1000) } });
+  try {
+    const key = throttleKey(email, ip);
+    const throttle = await prisma.loginThrottle.upsert({
+      where: { key },
+      create: { key, email: email.toLowerCase().trim(), ip, failedAttempts: 1 },
+      update: { failedAttempts: { increment: 1 } }
+    });
+    const attempts = throttle.failedAttempts;
+    if (attempts >= 3) {
+      const minutes = attempts >= 9 ? 7 * 24 * 60 : LOCK_DURATIONS[Math.min(Math.floor(attempts / 3) - 1, 2)];
+      await prisma.loginThrottle.update({ where: { key }, data: { lockedUntil: new Date(Date.now() + minutes * 60 * 1000) } });
+    }
+  } catch (err) {
+    console.warn("registerFailedLoginVirtual error (ignored):", err);
   }
 }
 
@@ -71,5 +84,9 @@ export async function registerSuccessfulLogin(userId: string, email: string, ip:
     where: { id: userId },
     data: { failedAttempts: 0, lockedUntil: null, lastLoginAt: new Date() }
   });
-  await prisma.loginThrottle.deleteMany({ where: { key: throttleKey(email, ip) } });
+  try {
+    await prisma.loginThrottle.deleteMany({ where: { key: throttleKey(email, ip) } });
+  } catch (err) {
+    console.warn("registerSuccessfulLogin loginThrottle.deleteMany error (ignored):", err);
+  }
 }
