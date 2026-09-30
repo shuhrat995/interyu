@@ -2,14 +2,19 @@ import { SignJWT, jwtVerify } from "jose";
 import { NextRequest } from "next/server";
 import { Role } from "@/lib/rbac";
 
-const jwtSecretRaw = process.env.JWT_SECRET;
-if (!jwtSecretRaw && process.env.NODE_ENV === "production") {
-  throw new Error("JWT_SECRET muhit o'zgaruvchisi o'rnatilmagan (production)");
+function getSecret(): Uint8Array {
+  const raw = process.env.JWT_SECRET;
+  if (!raw) {
+    // Build paytida (Vercel "Collecting page data") env bo'lmasligi mumkin —
+    // import vaqtida portlamaslik uchun faqat real chaqiruvda tekshiramiz.
+    // Lekin production runtime'da secretsiz imzo qo'yish/zsoxtalashtirishga yo'l yo'q.
+    if (process.env.NODE_ENV === "production" && process.env.NEXT_PHASE !== "phase-production-build") {
+      throw new Error("JWT_SECRET muhit o'zgaruvchisi o'rnatilmagan (production)");
+    }
+    return new TextEncoder().encode("dev-only-secret-change-me");
+  }
+  return new TextEncoder().encode(raw);
 }
-
-const secret = new TextEncoder().encode(
-  jwtSecretRaw || "dev-only-secret-change-me"
-);
 
 export type SessionData = {
   sub: string;
@@ -26,7 +31,7 @@ export async function signSession(payload: SessionData): Promise<string> {
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${SESSION_TTL_SEC}s`)
-  .sign(secret);
+  .sign(getSecret());
 }
 
 export async function getSession(req: NextRequest): Promise<SessionData | null> {
@@ -37,7 +42,7 @@ export async function getSession(req: NextRequest): Promise<SessionData | null> 
 
 export async function getSessionFromToken(token: string): Promise<SessionData | null> {
   try {
-    const { payload } = await jwtVerify(token, secret);
+    const { payload } = await jwtVerify(token, getSecret());
     if (!payload.sub) return null;
     return {
       sub: String(payload.sub),
