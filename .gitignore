@@ -7,7 +7,7 @@ node_modules
 *.db-journal
 *.db-wal
 *.db-shm
-prisma/dev.db*
+!prisma/dev.db
 .DS_Store
 tsconfig.tsbuildinfo
 .vercel

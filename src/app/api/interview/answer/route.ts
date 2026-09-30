@@ -54,14 +54,13 @@ function sanitizeAnswer(raw: string | null | undefined): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const parsed = await parseBody(req, schema);
-    if (!parsed.ok) return parsed.res;
-    const body = parsed.data;
+  const parsed = await parseBody(req, schema);
+  if (!parsed.ok) return parsed.res;
+  const body = parsed.data;
 
-    const interview = await prisma.interview.findUnique({ where: { id: body.interviewId } });
-    if (!interview) return jsonError(404, "Sessiya topilmadi");
-    if (interview.status !== "in_progress") return jsonError(409, "Sessiya yakunlangan");
+  const interview = await prisma.interview.findUnique({ where: { id: body.interviewId } });
+  if (!interview) return jsonError(404, "Sessiya topilmadi");
+  if (interview.status !== "in_progress") return jsonError(409, "Sessiya yakunlangan");
 
   // TZ 5.3.5: bir savolga ikkinchi javob yo'q (DB unique ham bor)
   const dup = await prisma.answer.findUnique({
@@ -219,8 +218,4 @@ export async function POST(req: NextRequest) {
     finished: false,
     overtime
   });
-  } catch (err) {
-    console.error("Interview answer error:", err);
-    return jsonError(500, "Javobni qabul qilishda xatolik yuz berdi");
-  }
 }
