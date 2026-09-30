@@ -106,8 +106,8 @@ export default function LoginForm({ mode = "login" }: { mode?: Mode }) {
         {step === "login" && (
           <form onSubmit={submitLogin} className="space-y-3">
             <div>
-              <label className="label" htmlFor="email">Email</label>
-              <input id="email" type="email" className="w-full" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
+              <label className="label" htmlFor="email">Login</label>
+              <input id="email" type="text" className="w-full" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="username" />
             </div>
             <div>
               <label className="label" htmlFor="password">Parol</label>
@@ -129,8 +129,8 @@ export default function LoginForm({ mode = "login" }: { mode?: Mode }) {
               <input id="bname" className="w-full" value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
             </div>
             <div>
-              <label className="label" htmlFor="bemail">Email</label>
-              <input id="bemail" type="email" className="w-full" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
+              <label className="label" htmlFor="bemail">Login</label>
+              <input id="bemail" type="text" className="w-full" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="username" />
             </div>
             <div>
               <label className="label" htmlFor="bpass">Parol (min 8)</label>

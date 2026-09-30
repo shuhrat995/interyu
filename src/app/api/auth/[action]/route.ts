@@ -16,12 +16,12 @@ import {
 } from "@/lib/loginGuard";
 
 const bootstrapSchema = z.object({
-  email: z.string().email(),
+  email: z.string().min(1).max(100),
   name: z.string().min(2).max(80),
   password: z.string().min(6)
 });
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().min(1).max(100),
   password: z.string().min(1)
 });
 
