@@ -75,10 +75,10 @@ export const POST = withAuth(
     let imported = 0;
     await prisma.$transaction(async (tx) => {
       if (mode === "replace") {
-        await tx.question.updateMany({ data: { deletedAt: new Date() }, where: { deletedAt: null } });
+        await tx.question.updateMany({ data: { deletedAt: new Date(), isActive: false }, where: { deletedAt: null } });
       }
       for (const v of valid) {
-        const q = await tx.question.create({ data: toDb(v.input) });
+        const q = await tx.question.create({ data: { ...toDb(v.input), version: 1 } });
         await tx.questionVersion.create({
           data: {
             questionId: q.id,

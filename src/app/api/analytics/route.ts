@@ -154,4 +154,4 @@ export const GET = withAuth(async () => {
   };
 
   return NextResponse.json({ kpi, daily, scoreBuckets, levels, topics: topicRows, days: DAYS });
-});
+}, { perm: "interview:view" });

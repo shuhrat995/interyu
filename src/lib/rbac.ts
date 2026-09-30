@@ -22,12 +22,13 @@ export const PERMISSIONS: Record<Role, string[]> = {
     "question:import",
     "question:export",
     "interview:view",
+    "interview:update",
     "audit:view",
     "ai:reprompts"
   ],
-  recruiter: ["interview:view:own", "question:export"],
-  editor: ["question:create", "question:update", "question:import", "question:export"],
-  viewer: ["question:export"]
+  recruiter: ["interview:view", "interview:update", "question:export"],
+  editor: ["question:create", "question:update", "question:import", "question:export", "interview:view"],
+  viewer: ["question:export", "interview:view"]
 };
 
 export function can(role: Role | undefined, perm: string): boolean {
@@ -35,6 +36,8 @@ export function can(role: Role | undefined, perm: string): boolean {
   const list = PERMISSIONS[role] ?? [];
   if (list.includes("*")) return true;
   if (list.includes(perm)) return true;
+  // "interview:view:own" eski sessiyalar uchun: interview:view bo'lsa ham o'tadi
+  if (perm === "interview:view" && list.includes("interview:view:own")) return true;
   // wildcard: "topic:*" amallarga mos keladi
   const [mod] = perm.split(":");
   return list.includes(`${mod}:*`);

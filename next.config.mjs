@@ -1,12 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true,
-  experimental: {
-    outputFileTracingIncludes: {
-      "/*": ["./prisma/dev.db"],
-      "/api/*": ["./prisma/dev.db"],
-      "/api/**/*": ["./prisma/dev.db"]
-    }
-  }
+  reactStrictMode: true
 };
 export default nextConfig;

@@ -148,9 +148,15 @@ async function callGeminiModel(
     if (!text) {
       return { ok: false, error: "Gemini bo'sh javob qaytardi", latencyMs, status: 200, retriable: false, retryWithoutThinking: false };
     }
+    let data: Record<string, unknown>;
+    try {
+      data = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return { ok: false, error: `Gemini noto'g'ri JSON qaytardi: ${text.slice(0, 160)}`, latencyMs, status: 200, retriable: false, retryWithoutThinking: false };
+    }
     return {
       ok: true,
-      data: JSON.parse(text) as Record<string, unknown>,
+      data,
       tokens: {
         input: json.usageMetadata?.promptTokenCount ?? 0,
         output: json.usageMetadata?.candidatesTokenCount ?? 0
@@ -211,8 +217,14 @@ async function callOpenAI(
     };
     const content = json.choices?.[0]?.message?.content;
     if (!content) return { error: "OpenAI bo'sh javob qaytardi", latencyMs };
+    let data: Record<string, unknown>;
+    try {
+      data = JSON.parse(content) as Record<string, unknown>;
+    } catch {
+      return { error: `OpenAI noto'g'ri JSON qaytardi: ${content.slice(0, 160)}`, latencyMs };
+    }
     return {
-      data: JSON.parse(content) as Record<string, unknown>,
+      data,
       tokens: { input: json.usage?.prompt_tokens ?? 0, output: json.usage?.completion_tokens ?? 0 },
       latencyMs
     };

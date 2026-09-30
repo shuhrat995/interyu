@@ -42,11 +42,19 @@ export default function QuestionForm({ id, topics, onClose, onSaved }: Props) {
 
   useEffect(() => {
     if (!id) return;
+    let cancelled = false;
     fetch(`/api/questions/${id}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`Yuklash xatosi (${r.status})`);
+        return r.json();
+      })
       .then((j) => {
+        if (cancelled) return;
         const d = j.question?.data;
-        if (!d) return;
+        if (!d) {
+          setErr(j.error || "Savol yuklanmadi");
+          return;
+        }
         setForm({
           topicId: d.topicId,
           type: d.type,
@@ -58,7 +66,13 @@ export default function QuestionForm({ id, topics, onClose, onSaved }: Props) {
           keywords: (d.keywords ?? []).join(", "),
           timeLimit: d.timeLimit
         });
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setErr(e instanceof Error ? e.message : "Yuklash xatosi");
       });
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   function set<K extends keyof FormState>(k: K, v: FormState[K]) {
@@ -122,13 +136,22 @@ export default function QuestionForm({ id, topics, onClose, onSaved }: Props) {
     e.preventDefault();
     setErr("");
     const filled = form.options.map((o) => o.trim());
+    // correctIndex — to'ldirilmagan bo'sh variantlar filtrlangandan KEYIN qayta hisoblanadi
+    // (aks holda ["A","","C"] da index siljib noto'g'ri javob saqlanardi)
+    const filtered = filled.filter(Boolean);
+    let mappedCorrect: number | null = null;
     if (form.type === "mcq") {
-      const nonEmpty = filled.filter(Boolean);
-      if (nonEmpty.length < 2) {
+      if (filtered.length < 2) {
         setErr("MCQ: kamida 2 ta to'ldirilgan variant kerak");
         return;
       }
       if (form.correctIndex === null || !filled[form.correctIndex]) {
+        setErr("To'g'ri javobni tanlang");
+        return;
+      }
+      const correctValue = filled[form.correctIndex];
+      mappedCorrect = filtered.indexOf(correctValue);
+      if (mappedCorrect < 0) {
         setErr("To'g'ri javobni tanlang");
         return;
       }
@@ -143,8 +166,8 @@ export default function QuestionForm({ id, topics, onClose, onSaved }: Props) {
         type: form.type,
         difficulty: form.difficulty,
         text: form.text,
-        options: form.options.map((o) => o.trim()).filter(Boolean),
-        correctIndex: form.correctIndex,
+        options: filtered,
+        correctIndex: form.type === "mcq" ? mappedCorrect : undefined,
         rubric: form.type === "written" ? form.rubric : undefined,
         keywords: form.keywords.split(",").map((k) => k.trim()).filter(Boolean),
         timeLimit: form.timeLimit
@@ -281,7 +304,12 @@ export default function QuestionForm({ id, topics, onClose, onSaved }: Props) {
                         onClick={() =>
                           setForm((f) => {
                             const opts = f.options.filter((_, idx) => idx !== i);
-                            return { ...f, options: opts, correctIndex: null };
+                            let ci = f.correctIndex;
+                            if (ci !== null) {
+                              if (ci === i) ci = null;
+                              else if (ci > i) ci = ci - 1;
+                            }
+                            return { ...f, options: opts, correctIndex: ci };
                           })
                         }
                         aria-label={`${"ABCDE"[i]} variantni o'chirish`}

@@ -32,7 +32,7 @@ export const GET = withAuth(async ({ req }) => {
     })
   ]);
   return NextResponse.json({ total, page, pageSize, rows });
-});
+}, { perm: "question:export" });
 
 export const POST = withAuth(
   async ({ req, session }) => {

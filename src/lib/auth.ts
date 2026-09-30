@@ -2,8 +2,13 @@ import { SignJWT, jwtVerify } from "jose";
 import { NextRequest } from "next/server";
 import { Role } from "@/lib/rbac";
 
+const jwtSecretRaw = process.env.JWT_SECRET;
+if (!jwtSecretRaw && process.env.NODE_ENV === "production") {
+  throw new Error("JWT_SECRET muhit o'zgaruvchisi o'rnatilmagan (production)");
+}
+
 const secret = new TextEncoder().encode(
-  process.env.JWT_SECRET || "dev-only-secret-change-me"
+  jwtSecretRaw || "dev-only-secret-change-me"
 );
 
 export type SessionData = {

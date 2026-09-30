@@ -23,13 +23,22 @@ CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/interview/answe
 echo "status: $CODE (422 bo'lishi kerak)"
 
 echo "=== 5. To'g'ri javob ==="
+QTYPE=$(echo "$START" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).question.type))")
+echo "savol turi: $QTYPE"
+if [ "$QTYPE" = "mcq" ]; then
+  PAYLOAD5='"selectedIndex":0'
+  PAYLOAD6='"selectedIndex":1'
+else
+  PAYLOAD5='"answerText":"Bu savolga batafsil javob: JavaScript event loop call stack va task navbatlarini boshqaradi, microtasklar macrotaskdan oldin bajariladi."'
+  PAYLOAD6='"answerText":"Bu savolga batafsil javob: yana bir bor javob berishga harakat qilyapman yetarli uzunlikda matn bilan"'
+fi
 ANS=$(curl -s -X POST "$BASE/api/interview/answer" -H "Content-Type: application/json" \
-  -d "{\"interviewId\":\"$IID\",\"questionId\":\"$QID\",\"answerText\":\"Bu savolga batafsil javob: JavaScript event loop call stack va task navbatlarini boshqaradi, microtask'lar macrotask'dan oldin bajariladi va shu tarzda asinxron kod tartibli ishlaydi.\"}")
+  -d "{\"interviewId\":\"$IID\",\"questionId\":\"$QID\",$PAYLOAD5}")
 echo "$ANS" | head -c 400; echo
 
 echo "=== 6. Xuddi shu savolga qayta javob (409 kutamiz) ==="
 CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/interview/answer" -H "Content-Type: application/json" \
-  -d "{\"interviewId\":\"$IID\",\"questionId\":\"$QID\",\"answerText\":\"Bu savolga batafsil javob: yana bir bor javob berishga harakat qilyapman yetarli uzunlikda matn bilan\"}")
+  -d "{\"interviewId\":\"$IID\",\"questionId\":\"$QID\",$PAYLOAD6}")
 echo "status: $CODE (409 bo'lishi kerak)"
 
 echo "=== 7. Resume (GET /api/interview/:id) ==="
@@ -41,8 +50,14 @@ for i in $(seq 1 20); do
   FINISHED=$(echo "$STATE" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const j=JSON.parse(d);console.log(j.status!=='in_progress'||!j.question?'yes':'no')})")
   if [ "$FINISHED" = "yes" ]; then echo "sessiya tugadi yoki savol yo'q (iteration $i)"; break; fi
   QID=$(echo "$STATE" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).question.id))")
+  QTYPE2=$(echo "$STATE" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).question.type))")
+  if [ "$QTYPE2" = "mcq" ]; then
+    LOOP_PAYLOAD='"selectedIndex":0'
+  else
+    LOOP_PAYLOAD='"answerText":"Test javob: bu yerda mavzu boyicha asosiy tushunchalar, misollar va chegara holatlari korib chiqiladi, event loop, promise, closure, rendering kabi atamalar qamrab olinadi."'
+  fi
   ANS=$(curl -s -X POST "$BASE/api/interview/answer" -H "Content-Type: application/json" \
-    -d "{\"interviewId\":\"$IID\",\"questionId\":\"$QID\",\"answerText\":\"Test javob: bu yerda mavzu bo'yicha asosiy tushunchalar, misollar va chegara holatlari ko'rib chiqiladi, event loop, promise, closure, rendering kabi atamalar qamrab olinadi.\"}")
+    -d "{\"interviewId\":\"$IID\",\"questionId\":\"$QID\",$LOOP_PAYLOAD}")
   EVAL=$(echo "$ANS" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const j=JSON.parse(d);console.log(j.finished?'FINISHED':(j.next?'next':'?'))})")
   if [ "$EVAL" = "FINISHED" ]; then echo "✅ Barcha savollar javoblandi ($i savoldan keyin)"; break; fi
 done

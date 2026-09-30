@@ -57,7 +57,7 @@ export const GET = withAuth(async ({ req }) => {
       "Content-Disposition": `attachment; filename="questions-${Date.now()}.csv"`
     }
   });
-});
+}, { perm: "question:export" });
 
 function safeOptions(json: string | null): string[] {
   try {

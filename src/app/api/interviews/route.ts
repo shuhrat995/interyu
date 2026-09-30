@@ -30,7 +30,6 @@ export const GET = withAuth(async ({ req }) => {
       }
     })
   ]);
-
   const list = rows.map((r) => {
     let report: { overall_score?: number; level?: string; hiring_recommendation?: string } | null = null;
     try {
@@ -58,7 +57,7 @@ export const GET = withAuth(async ({ req }) => {
   });
 
   return NextResponse.json({ total, page, pageSize, rows: list });
-});
+}, { perm: "interview:view" });
 
 function countAntiCheat(json: string): number {
   try {

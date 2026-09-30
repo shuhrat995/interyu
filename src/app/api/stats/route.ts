@@ -92,4 +92,4 @@ export const GET = withAuth(async () => {
       monthErrors: monthAIErrors
     }
   });
-});
+}, { perm: "interview:view" });

@@ -584,7 +584,7 @@ export default function InterviewPage() {
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs text-mut">
-                <span>👤 {name.trim()} · {track ? getTrack(track).label : ""}</span>
+                <span>👤 {name.trim()} · {track ? getTrack(track)?.label ?? track : ""}</span>
                 <button type="button" className="hover:text-acc" onClick={() => setWelcomeStep("track")}>
                   ← yo&apos;nalish
                 </button>
@@ -663,7 +663,7 @@ export default function InterviewPage() {
           {stack && getStack(stack) ? (
             <span className="badge border-acc/40 text-acc">{getStack(stack)?.label}</span>
           ) : (
-            track && <span className="badge border-acc/40 text-acc">{getTrack(track).label}</span>
+            track && <span className="badge border-acc/40 text-acc">{getTrack(track)?.label ?? track}</span>
           )}
         </div>
 
@@ -821,7 +821,7 @@ export default function InterviewPage() {
             {stack && getStack(stack) ? (
               <span className="ml-2 badge border-line text-mut">{getStack(stack)?.label}</span>
             ) : (
-              track && <span className="ml-2 badge border-line text-mut">{getTrack(track).label}</span>
+              track && <span className="ml-2 badge border-line text-mut">{getTrack(track)?.label ?? track}</span>
             )}
           </span>
           <span>Daraja {level}/5 · {answered} javob berilgan</span>

@@ -63,4 +63,4 @@ export const GET = withAuth(async () => {
     daily14,
     topPaths: topPaths.map((p) => ({ path: p.path, count: p._count }))
   });
-});
+}, { perm: "interview:view" });

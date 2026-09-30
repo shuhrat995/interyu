@@ -23,7 +23,7 @@ export const GET = withAuth(async () => {
     include: { _count: { select: { questions: { where: { deletedAt: null } } } } }
   });
   return NextResponse.json({ topics });
-});
+}, { perm: "question:export" });
 
 export const POST = withAuth(
   async ({ req, session }) => {
@@ -72,8 +72,8 @@ export const PATCH = withAuth(
 );
 
 export const DELETE = withAuth(
-  async ({ req, params, session }) => {
-    const id = (params as { id: string }).id;
+  async ({ req, session }) => {
+    const id = new URL(req.url).searchParams.get("id");
     if (!id) return jsonError(400, "id kerak (query: ?id=...)");
     const before = await prisma.topic.findUnique({
       where: { id },

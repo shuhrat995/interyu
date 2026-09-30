@@ -139,11 +139,12 @@ export function isTrackSlug(value: unknown): value is TrackSlug {
   return typeof value === "string" && TRACK_SLUGS.includes(value as TrackSlug);
 }
 
-export function getTrack(slug: string | null | undefined): Track {
-  return TRACKS.find((t) => t.slug === slug) ?? TRACKS[0];
+export function getTrack(slug: string | null | undefined): Track | null {
+  if (!slug) return null;
+  return TRACKS.find((t) => t.slug === slug) ?? null;
 }
 
 /** Savol tanlashda ishlatiladigan mavzu sluglari */
 export function trackTopicSlugs(slug: string | null | undefined): string[] {
-  return getTrack(slug).topics;
+  return getTrack(slug)?.topics ?? [];
 }

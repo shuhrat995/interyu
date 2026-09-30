@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
-import { jsonError, parseBody, withAuth } from "@/lib/api";
+import { audit, jsonError, parseBody, withAuth } from "@/lib/api";
 import { aiAssist } from "@/lib/ai";
 
 const schema = z.object({
@@ -22,15 +21,7 @@ export const POST = withAuth(
 
     if (result.ok) {
       if (questionId) {
-        await prisma.auditLog.create({
-          data: {
-            actorId: session.sub,
-            action: `ai_assist_${kind}`,
-            entity: "question",
-            entityId: questionId,
-            afterJson: JSON.stringify({ provider: result.provider })
-          }
-        });
+        await audit(req, session.sub, `ai_assist_${kind}`, "question", questionId, null, { provider: result.provider });
       }
       return NextResponse.json({ provider: result.provider, data: result.data });
     }

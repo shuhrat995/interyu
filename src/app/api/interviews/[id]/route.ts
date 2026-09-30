@@ -81,7 +81,7 @@ export const GET = withAuth<{ id: string }>(async ({ params }) => {
     notes: interview.notes,
     tags: interview.tags
   });
-});
+}, { perm: "interview:view" });
 
 const patchSchema = z.object({
   note: z.string().min(1).max(2000).optional(),
@@ -122,7 +122,7 @@ export const PATCH = withAuth<{ id: string }>(async ({ req, params, session }) =
   }
 
   return NextResponse.json({ ok: true });
-});
+}, { perm: "interview:update" });
 
 function safeJson(v: string | null): unknown {
   try {

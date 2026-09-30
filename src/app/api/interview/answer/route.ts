@@ -54,9 +54,10 @@ function sanitizeAnswer(raw: string | null | undefined): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  const parsed = await parseBody(req, schema);
-  if (!parsed.ok) return parsed.res;
-  const body = parsed.data;
+  try {
+    const parsed = await parseBody(req, schema);
+    if (!parsed.ok) return parsed.res;
+    const body = parsed.data;
 
   const interview = await prisma.interview.findUnique({ where: { id: body.interviewId } });
   if (!interview) return jsonError(404, "Sessiya topilmadi");
@@ -86,6 +87,12 @@ export async function POST(req: NextRequest) {
   if (question.type === "written" && !isSkipped) {
     if (!answerText || answerText.length < settings.minWrittenChars) {
       return jsonError(422, `Yozma javob kamida ${settings.minWrittenChars} belgi bo'lishi kerak`);
+    }
+  }
+  // MCQ: variant tanlanishi shart (skipped bo'lmasa). Aks holda "qisqa" matn bilan javob o'tib ketardi.
+  if (question.type === "mcq" && !isSkipped) {
+    if (body.selectedIndex === undefined || body.selectedIndex === null) {
+      return jsonError(422, "Variant tanlanmadi");
     }
   }
   if (isSkipped && !answerText) {
@@ -218,4 +225,8 @@ export async function POST(req: NextRequest) {
     finished: false,
     overtime
   });
+  } catch (e) {
+    console.error("interview/answer:", e);
+    return jsonError(500, "Server xatosi");
+  }
 }

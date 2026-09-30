@@ -51,6 +51,17 @@ export function withAuth<P = Record<string, string>>(
   return async (req: NextRequest, ctx: { params?: Promise<P> }) => {
     const session = await getSession(req);
     if (!session) return jsonError(401, "Avtorizatsiya talab qilinadi");
+    // JWT eski bo'lishi mumkin: rol va faollikni DB dan yangilash (stale-token / deactivated bypass fix)
+    try {
+      const dbUser = await prisma.adminUser.findUnique({
+        where: { id: session.sub },
+        select: { role: true, isActive: true }
+      });
+      if (!dbUser || !dbUser.isActive) return jsonError(401, "Sessiya yaroqsiz");
+      session.role = dbUser.role as SessionData["role"];
+    } catch {
+      // DB o'lik bo'lsa JWT dagi rol bilan davom etamiz (availability > strict)
+    }
     if (opts?.perm && !can(session.role, opts.perm)) {
       return jsonError(403, "Ruxsat yo'q");
     }

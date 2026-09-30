@@ -25,7 +25,7 @@ export const GET = withAuth<{ id: string }>(async ({ params }) => {
       editedById: v.editedById
     }))
   });
-});
+}, { perm: "question:export" });
 
 export const PATCH = withAuth<{ id: string }>(async ({ req, params, session }) => {
   const { id } = params;
@@ -63,7 +63,7 @@ export const PATCH = withAuth<{ id: string }>(async ({ req, params, session }) =
     version: updated.version,
     newVersionCreated: usedCount > 0
   });
-});
+}, { perm: "question:update" });
 
 export const DELETE = withAuth<{ id: string }>(
   async ({ req, params, session }) => {
@@ -108,4 +108,4 @@ export const POST = withAuth<{ id: string }>(async ({ req, params, session }) =>
   });
   await audit(req, session.sub, "restore", "question", id, null, fromDb(restored));
   return NextResponse.json({ ok: true, question: fromDb(restored) });
-});
+}, { perm: "question:update" });

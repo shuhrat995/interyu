@@ -31,8 +31,9 @@ const changeSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const { pathname } = new URL(req.url);
-  const action = pathname.split("/").pop();
+  try {
+    const { pathname } = new URL(req.url);
+    const action = pathname.split("/").pop();
 
   if (action === "bootstrap") {
     const guard = await requireSetup();
@@ -88,7 +89,11 @@ export async function POST(req: NextRequest) {
     return res;
   }
 
-  return jsonError(404, "Noma'lum amal");
+    return jsonError(404, "Noma'lum amal");
+  } catch (e) {
+    console.error("auth/action:", e);
+    return jsonError(500, "Server xatosi");
+  }
 }
 
 export const PUT = withAuth(async ({ req, session }) => {

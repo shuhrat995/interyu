@@ -27,4 +27,4 @@ export const GET = withAuth(async ({ req }) => {
     })
   ]);
   return NextResponse.json({ total, page, pageSize, rows });
-});
+}, { perm: "audit:view" });
