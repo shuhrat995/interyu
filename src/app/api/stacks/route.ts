@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { STACKS } from "@/lib/tracks";
 
+export const dynamic = "force-dynamic";
+
 /** Ommaviy: stack ro'yxati + har birida nechta aktiv savol borligi */
 export async function GET() {
   const rows = await prisma.question.groupBy({
