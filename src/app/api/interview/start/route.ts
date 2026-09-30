@@ -4,19 +4,24 @@ import { prisma } from "@/lib/prisma";
 import { getIp, jsonError, parseBody } from "@/lib/api";
 import { logVisit, isBot } from "@/lib/analytics";
 import { getSettings, pickNextQuestion, toServed } from "@/lib/interview";
-import { trackTopicSlugs, TRACK_SLUGS } from "@/lib/tracks";
+import { trackTopicSlugs, TRACK_SLUGS, getStack, isStackSlug } from "@/lib/tracks";
 
 const schema = z.object({
   name: z.string().min(2).max(80),
-  track: z.enum(TRACK_SLUGS as [string, ...string[]]).optional()
+  track: z.enum(TRACK_SLUGS as [string, ...string[]]).optional(),
+  stack: z.string().min(1).max(32).optional()
 });
 
 export async function POST(req: NextRequest) {
   const parsed = await parseBody(req, schema);
   if (!parsed.ok) return parsed.res;
   const { name } = parsed.data;
-  const track = parsed.data.track ?? "frontend";
-  const topics = trackTopicSlugs(track);
+  const track = parsed.data.track ?? getStack(parsed.data.stack)?.track ?? "frontend";
+  // Stack tanlangan bo'lsa — shu track'ga tegishli bo'lishi shart
+  const stack = parsed.data.stack && isStackSlug(parsed.data.stack) ? parsed.data.stack : null;
+  if (parsed.data.stack && !stack) return jsonError(422, "Bunday stack yo'q");
+  if (stack && getStack(stack)?.track !== track) return jsonError(422, "Stack bu yo'nalishga tegishli emas");
+  const topics = stack ? (getStack(stack)?.topics ?? trackTopicSlugs(track)) : trackTopicSlugs(track);
 
   const settings = await getSettings();
   const available = await prisma.question.count({
@@ -28,6 +33,7 @@ export async function POST(req: NextRequest) {
     data: {
       candidateName: name,
       track,
+      stack,
       currentLevel: 0,
       settingsJson: JSON.stringify(settings)
     }
@@ -60,13 +66,14 @@ export async function POST(req: NextRequest) {
       entity: "interview",
       entityId: interview.id,
       ip: getIp(req),
-      afterJson: JSON.stringify({ name, track })
+      afterJson: JSON.stringify({ name, track, stack })
     }
   });
 
   return NextResponse.json({
     interviewId: interview.id,
     track,
+    stack,
     question: toServed(q, 1, settings.totalQuestions)
   });
 }

@@ -70,7 +70,11 @@ const TOPIC_ADVICE: Record<string, string> = {
   react: "Hookslar qoidalari (useEffect bog'liqliklari), state batching, render optimizatsiyasi (memo/useMemo) va reconciliation'ni o'rganing.",
   api: "HTTP metod/status kodlar, REST resurs dizayni, autentifikatsiya (JWT/sessiya) va idempotentlikni takrorlang.",
   database: "Indekslar, normalizatsiya, JOIN turlari, transaksiya va N+1 muammosini amaliyot bilan mustahkamlang.",
-  algorithms: "Big-O baholash, massiv/string algoritmlari va asosiy ma'lumot tuzilmalarini (stack, queue, map, set) mashq qiling."
+  algorithms: "Big-O baholash, massiv/string algoritmlari va asosiy ma'lumot tuzilmalarini (stack, queue, map, set) mashq qiling.",
+  python: "List/dict/set farqlari, comprehension, generatorlar, dekoratorlar va asyncio asoslarini amaliy misollarda mustahkamlang.",
+  nodejs: "Event loop, streamlar, Express middleware, JWT/sessiya va cluster/worker farqini amaliyot bilan o'rganing.",
+  java: "OOP (meros/kompozitsiya), collections, exception, Stream API va Spring IoC/DI ni misollar bilan takrorlang.",
+  go: "Slice/map, goroutine/channel, select, mutex va context (timeout/cancel) ni kichik concurrent dasturlarda mashq qiling."
 };
 
 const ADVICE_FALLBACK = "Shu mavzuning asosiy tushunchalarini qisqa konspekt qilib, keyin amaliy loyihada qo'llang.";
@@ -96,14 +100,90 @@ function verdictOf(score: number): WrittenEvaluation["verdict"] {
   return "zaif";
 }
 
-/** Rubric va kalit so'zlar asosida deterministik fallback baho */
+/** O'zbek/ingliz aralash matnni normallash: o'/g' , imlo, tinish belgilari */
+function normUz(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[’‘`´ʻʼ]/g, "'")
+    .replace(/o'/g, "o")
+    .replace(/g'/g, "g")
+    .replace(/[^a-z0-9+#/ ]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** component <-> komponent, loop <-> sikl kabi transliteratsiya farqlarini yumshatish */
+function canonToken(t: string): string {
+  let x = t;
+  // c -> k (component -> komponent), ph -> f, th -> t, oo -> u kabi eng keng tarqalgan almashtirishlar
+  x = x.replace(/ph/g, "f");
+  if (x.length >= 4) {
+    x = x.replace(/c/g, "k");
+    x = x.replace(/w/g, "v");
+  }
+  return x;
+}
+
+function editDist(a: string, b: string): number {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > 2) return 99;
+  const m = a.length;
+  const n = b.length;
+  const dp: number[] = Array(n + 1)
+    .fill(0)
+    .map((_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+
+/** Kalit so'z topildimi? — aniq substring + token fuzzy (imlo/sinonim xatoga chidamli) */
+function keywordHit(keyword: string, normText: string, textTokens: Set<string>): boolean {
+  const nk = normUz(keyword);
+  if (!nk) return false;
+  if (normText.includes(nk)) return true;
+  const kTokens = nk.split(" ").filter(Boolean).map(canonToken);
+  if (!kTokens.length) return false;
+  // Ko'p so'zli keyword: hech bo'lmasa bitta asosiy tokeni topilsa hit (masalan "qayta ishlatish" -> "qayta" yoki "ishlatish")
+  let matched = 0;
+  for (const kt of kTokens) {
+    if (kt.length < 3) continue;
+    let ok = false;
+    for (const tt of textTokens) {
+      if (tt.includes(kt) || kt.includes(tt)) {
+        ok = true;
+        break;
+      }
+      if (tt.length >= 4 && kt.length >= 4 && editDist(tt, kt) <= 1) {
+        ok = true;
+        break;
+      }
+    }
+    if (ok) matched++;
+  }
+  // 1 tokenli keyword -> 1 ta topilsa yetadi; ko'p tokenli -> kamida yarmi
+  return kTokens.length === 1 ? matched >= 1 : matched >= Math.ceil(kTokens.length / 2);
+}
+
+/** Adolatli fallback: sinonim/translitga chidamli, urinish uchun minimal ball beradi */
 export function mockEvaluate(text: string, rubric: string, keywords: string[], difficulty: number): WrittenEvaluation {
-  const words = text.trim().split(/\s+/).length;
-  const lower = text.toLowerCase();
-  const hits = keywords.filter((k) => lower.includes(k.toLowerCase()));
-  const coverage = keywords.length ? hits.length / keywords.length : 0.5;
+  const trimmed = text.trim();
+  const words = trimmed ? trimmed.split(/\s+/).length : 0;
+  const normText = normUz(trimmed);
+  const textTokens = new Set(normText.split(" ").filter(Boolean).map(canonToken));
+  const hits = keywords.filter((k) => keywordHit(k, normText, textTokens));
+  // Kalit so'z yo'q bo'lsa javob uzunligiga qarab adolatli baho (avvalgidek 0 ga tushirmaslik)
+  const coverage = keywords.length ? hits.length / keywords.length : 0.6;
   const lenBonus = Math.min(1, words / (40 + difficulty * 20));
-  const score = Math.round(Math.min(100, coverage * 60 + lenBonus * 40));
+  // Baza 5 ball (urinish uchun) + coverage 65 + uzunlik 30 — qisman to'g'ri javob 50+ oladi
+  const score = Math.round(Math.min(100, 5 + coverage * 65 + lenBonus * 30));
   const missed = keywords.filter((k) => !hits.includes(k));
   return {
     score,
@@ -124,7 +204,19 @@ export function mockEvaluate(text: string, rubric: string, keywords: string[], d
 /**
  * Yozma javobni baholash. AI 9 soniyalik byudjet ichida javob bermasa —
  * heuristik baho ishlatiladi, shunda nomzod kutib qolmaydi.
+ *
+ * Adolat siyosati (past baho shikoyati bo'yicha): DB'dagi eski prompt qattiq bo'lsa ham
+ * kod darajasida fairness yo'riqnomasi qo'shiladi — qisman to'g'ri javob 50+ olishi shart.
  */
+const FAIRNESS_RULES = `Baholash qoidalari (majburiy, adolatli bo'ling):
+- 0-15: bo'sh yoki 1-2 so'zli, mavzuga aloqasiz javob.
+- 40-59: qisman to'g'ri — asosiy g'oya bor, lekin 1-2 muhim tushuncha yetishmaydi.
+- 60-74: yaxshi — rubric'ning yarmi+ qamrab olingan, kichik kamchilik bor.
+- 75-89: kuchli — deyarli to'liq, faqat chuqurlik/detail yetishmaydi.
+- 90-100: a'lo — to'liq, aniq, misolli.
+- O'zbekcha/inglizcha sinonimlarni bir xil deb qabul qiling (komponent=component, sikl=loop, solishtirish=compare, qayta ishlatish=reusable va h.k.). Imlo/transliteratsiya xatosi uchun 5 balldan ko'p ayirmang.
+- Javob qisqa bo'lsa ham g'oya to'g'ri bo'lsa kamida 55 bering. Faqat kalit so'z sanash bilan baholamang — ma'noga qarang.`;
+
 export async function evaluateWritten(args: {
   question: string;
   answer: string;
@@ -135,7 +227,7 @@ export async function evaluateWritten(args: {
 }): Promise<{ evaluation: WrittenEvaluation; provider: AIProvider }> {
   const tpl = await activePrompt("evaluate_written");
   if (tpl) {
-    const prompt = fill(tpl, {
+    const base = fill(tpl, {
       question: clip(args.question, 600),
       answer: clip(args.answer, 1600),
       rubric: clip(args.rubric, 900),
@@ -143,6 +235,8 @@ export async function evaluateWritten(args: {
       topic: args.topic ?? "",
       difficulty: String(args.difficulty)
     });
+    // Eski DB prompti bo'lsa ham fairness qo'shiladi (past baho fix)
+    const prompt = base.includes("Baholash qoidalari") ? base : `${base}\n\n${FAIRNESS_RULES}`;
     const res = await callAI("evaluate_written", prompt, { budgetMs: 9000, maxOutputTokens: 500 });
     if (res.ok && typeof res.data.score === "number") {
       const score = Math.max(0, Math.min(100, Math.round(res.data.score)));

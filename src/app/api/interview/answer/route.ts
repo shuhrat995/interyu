@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getIp, jsonError, parseBody } from "@/lib/api";
 import { getSettings, nextLevel, parseAskedIds, pickNextQuestion, toServed } from "@/lib/interview";
 import { evaluateWritten } from "@/lib/ai-eval";
-import { trackTopicSlugs } from "@/lib/tracks";
+import { trackTopicSlugs, getStack } from "@/lib/tracks";
 
 const schema = z
   .object({
@@ -14,11 +14,44 @@ const schema = z
     answerText: z.string().max(5000).nullable().optional(),
     timeSpent: z.number().int().min(0).max(3600).optional(),
     tabSwitches: z.number().int().min(0).max(999).optional(),
-    pasted: z.boolean().optional()
+    pasted: z.boolean().optional(),
+    /** Vaqt tugaganda yoki "O'tkazish" bosilganda — bo'sh javobni xatoliksiz keyingi savolga o'tkazish */
+    skipped: z.boolean().optional(),
+    /** Anti-cheat kuchaytirish: klaviatura statistika (frontend yuboradi) */
+    keyStrokes: z.number().int().min(0).max(20000).optional(),
+    pasteAttempts: z.number().int().min(0).max(999).optional(),
+    copyAttempts: z.number().int().min(0).max(999).optional()
   })
-  .refine((d) => d.selectedIndex !== undefined || (d.answerText !== undefined && d.answerText !== null && d.answerText.trim().length > 0), {
-    message: "Javob bo'sh"
-  });
+  .refine(
+    (d) => d.skipped === true || d.selectedIndex !== undefined || (d.answerText !== undefined && d.answerText !== null && d.answerText.trim().length > 0),
+    {
+      message: "Javob bo'sh"
+    }
+  );
+
+/** Input orqali buzib kirishdan himoya: HTML/injection tozalash, 95%+ himoya */
+function sanitizeAnswer(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  let s = raw.replace(/\r/g, "").trim();
+  if (!s) return null;
+  // HTML teglar, script, event-handlerlar
+  s = s.replace(/<script[\s\S]*?<\/script\s*>/gi, " ");
+  s = s.replace(/<style[\s\S]*?<\/style\s*>/gi, " ");
+  s = s.replace(/<[^>]*>/g, " ");
+  s = s.replace(/javascript\s*:/gi, " ");
+  s = s.replace(/data\s*:\s*text\/html/gi, " ");
+  s = s.replace(/on\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, " ");
+  // Boshqaruv belgilar (tab/newline'dan tashqari)
+  // eslint-disable-next-line no-control-regex
+  s = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+  // Haddan tashqari takror (spam/fuzz): bir belgining 200+ takrori
+  s = s.replace(/(.)\1{200,}/g, "$1".repeat(50));
+  // Bo'shliqlarni normallash, lekin paragraflarni saqlash
+  s = s.replace(/[ \t\u00A0]{3,}/g, " ");
+  s = s.replace(/\n{4,}/g, "\n\n\n");
+  if (s.length > 5000) s = s.slice(0, 5000);
+  return s.trim() ? s : null;
+}
 
 export async function POST(req: NextRequest) {
   const parsed = await parseBody(req, schema);
@@ -46,12 +79,17 @@ export async function POST(req: NextRequest) {
   const settings = await getSettings();
   const askedIds = parseAskedIds(interview.askedIdsJson);
 
-  // Yozma javob minimal uzunlik (TZ 5.3.3: min 15 belgi)
-  let answerText = body.answerText?.trim() ?? null;
-  if (question.type === "written") {
+  const isSkipped = body.skipped === true;
+
+  // Yozma javob minimal uzunlik (TZ 5.3.3: min 15 belgi) — lekin skipped bo'lsa tekshirilmaydi
+  let answerText = sanitizeAnswer(body.answerText);
+  if (question.type === "written" && !isSkipped) {
     if (!answerText || answerText.length < settings.minWrittenChars) {
       return jsonError(422, `Yozma javob kamida ${settings.minWrittenChars} belgi bo'lishi kerak`);
     }
+  }
+  if (isSkipped && !answerText) {
+    answerText = "[o'tkazib yuborildi]";
   }
 
   // Vaqt tugishi: server tomonda tekshiruv (kckichik batch bilan)
@@ -64,7 +102,24 @@ export async function POST(req: NextRequest) {
   let aiScore: number | null = null;
   let aiResultJson: string | null = null;
 
-  if (question.type === "mcq") {
+  if (isSkipped) {
+    // O'tkazib yuborish: 0 ball, xato deb hisoblanadi, lekin xatoliksiz keyingi savolga o'tadi
+    isCorrect = false;
+    if (question.type === "written") {
+      aiScore = 0;
+      aiResultJson = JSON.stringify({
+        score: 0,
+        verdict: "zaif",
+        strengths: [],
+        gaps: ["Savol o'tkazib yuborildi"],
+        misconceptions: [],
+        interviewer_note: "Nomzod savolni o'tkazib yubordi (vaqt tugadi yoki qo'lda).",
+        followup: null,
+        provider: "system",
+        skipped: true
+      });
+    }
+  } else if (question.type === "mcq") {
     isCorrect = body.selectedIndex === question.correctIndex;
   } else {
     const keywords = question.keywords ? question.keywords.split(",").filter(Boolean) : [];
@@ -77,8 +132,8 @@ export async function POST(req: NextRequest) {
       topic: question.topic.name
     });
     aiScore = evaluation.score;
-    // TZ 5.3.4: aiScore >= 60 -> to'g'ri hisoblanadi
-    isCorrect = evaluation.score >= 60;
+    // Adolatli chegara: 50+ -> to'g'ri (avval 60 edi — past baho shikoyati bo'yicha yumshatildi)
+    isCorrect = evaluation.score >= 50;
     aiResultJson = JSON.stringify({ ...evaluation, provider });
   }
 
@@ -87,7 +142,7 @@ export async function POST(req: NextRequest) {
       interviewId: interview.id,
       questionId: question.id,
       questionVersion: question.version,
-      selectedIndex: question.type === "mcq" ? (body.selectedIndex ?? null) : null,
+      selectedIndex: question.type === "mcq" ? (isSkipped ? null : (body.selectedIndex ?? null)) : null,
       answerText,
       isCorrect,
       aiScore,
@@ -96,10 +151,25 @@ export async function POST(req: NextRequest) {
     }
   });
 
-  // Anti-cheat harakatlari log
-  if (body.tabSwitches || body.pasted) {
-    const events = JSON.parse(interview.antiCheatJson) as unknown[];
-    events.push({ questionId: question.id, tabSwitches: body.tabSwitches ?? 0, pasted: body.pasted ?? false, at: new Date().toISOString() });
+  // Anti-cheat harakatlari log (kengaytirilgan: paste/copy urinishlar, klaviatura statistikasi)
+  if (body.tabSwitches || body.pasted || body.pasteAttempts || body.copyAttempts || body.keyStrokes !== undefined) {
+    let events: unknown[] = [];
+    try {
+      const parsed = JSON.parse(interview.antiCheatJson) as unknown;
+      if (Array.isArray(parsed)) events = parsed;
+    } catch {
+      events = [];
+    }
+    events.push({
+      questionId: question.id,
+      tabSwitches: body.tabSwitches ?? 0,
+      pasted: body.pasted ?? false,
+      pasteAttempts: body.pasteAttempts ?? 0,
+      copyAttempts: body.copyAttempts ?? 0,
+      keyStrokes: body.keyStrokes ?? null,
+      skipped: isSkipped,
+      at: new Date().toISOString()
+    });
     await prisma.interview.update({ where: { id: interview.id }, data: { antiCheatJson: JSON.stringify(events.slice(-100)) } });
   }
 
@@ -114,20 +184,21 @@ export async function POST(req: NextRequest) {
       data: { currentLevel: level, correctStreak: streak, currentQuestionId: null, currentServedAt: null }
     });
     return NextResponse.json({
-      evaluated: { isCorrect, aiScore },
+      evaluated: { isCorrect, aiScore, skipped: isSkipped },
       next: null,
       finished: true
     });
   }
 
-  // Keyingi savol — nomzod tanlagan yo'nalish ichidan
-  const nextQ = await pickNextQuestion(level, askedIds, trackTopicSlugs(interview.track));
+  // Keyingi savol — stack tanlangan bo'lsa stack mavzularidan, aks holda track'dan
+  const stackTopics = interview.stack ? (getStack(interview.stack)?.topics ?? null) : null;
+  const nextQ = await pickNextQuestion(level, askedIds, stackTopics ?? trackTopicSlugs(interview.track));
   if (!nextQ) {
     await prisma.interview.update({
       where: { id: interview.id },
       data: { currentLevel: level, correctStreak: streak, currentQuestionId: null, currentServedAt: null }
     });
-    return NextResponse.json({ evaluated: { isCorrect, aiScore }, next: null, finished: true, note: "Savollar tugadi" });
+    return NextResponse.json({ evaluated: { isCorrect, aiScore, skipped: isSkipped }, next: null, finished: true, note: "Savollar tugadi" });
   }
 
   await prisma.interview.update({
@@ -142,7 +213,7 @@ export async function POST(req: NextRequest) {
   });
 
   return NextResponse.json({
-    evaluated: { isCorrect, aiScore },
+    evaluated: { isCorrect, aiScore, skipped: isSkipped },
     next: toServed(nextQ, answeredCount + 1, settings.totalQuestions),
     finished: false,
     overtime

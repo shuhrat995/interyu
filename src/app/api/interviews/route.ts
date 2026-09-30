@@ -43,6 +43,7 @@ export const GET = withAuth(async ({ req }) => {
       candidateName: r.candidateName,
       status: r.status,
       track: r.track,
+      stack: r.stack,
       currentLevel: r.currentLevel,
       answered: r._count.answers,
       startedAt: r.startedAt,

@@ -175,6 +175,7 @@ model Interview {
   candidateName     String
   status            String    @default("in_progress") // in_progress | finished | abandoned
   track             String?   // frontend | backend — nomzod tanlagan yo'nalish
+  stack             String?   // javascript | react | typescript | htmlcss | python | nodejs | java | go
   settingsJson      String?   // sessiya boshidagi sozlamalar snapshot
   currentLevel      Int       @default(0)
   askedIdsJson      String    @default("[]")

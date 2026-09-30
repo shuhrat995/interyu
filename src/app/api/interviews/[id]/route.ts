@@ -69,6 +69,7 @@ export const GET = withAuth<{ id: string }>(async ({ params }) => {
       candidateName: interview.candidateName,
       status: interview.status,
       track: interview.track,
+      stack: interview.stack,
       currentLevel: interview.currentLevel,
       startedAt: interview.startedAt,
       finishedAt: interview.finishedAt,

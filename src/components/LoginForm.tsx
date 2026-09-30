@@ -6,6 +6,19 @@ import { useState } from "react";
 
 type Mode = "login" | "bootstrap";
 
+/** Turli server javoblaridan o'qish mumkin bo'lgan xato matnini ajratib oladi. */
+function errorMessage(payload: unknown, status: number): string {
+  const obj = (payload ?? {}) as Record<string, unknown>;
+  const err = obj.error;
+  if (typeof err === "string" && err) return err;
+  if (err && typeof err === "object") {
+    const msg = (err as { message?: unknown }).message;
+    if (typeof msg === "string" && msg) return msg;
+  }
+  if (typeof obj.message === "string" && obj.message) return obj.message;
+  return `Server xato qaytardi (HTTP ${status})`;
+}
+
 export default function LoginForm({ mode = "login" }: { mode?: Mode }) {
   const router = useRouter();
   const [step, setStep] = useState<Mode>(mode);
@@ -26,12 +39,22 @@ export default function LoginForm({ mode = "login" }: { mode?: Mode }) {
         headers: { "Content-Type": "application/json" },
         body: body === undefined ? undefined : JSON.stringify(body)
       });
-      const json = await res.json().catch(() => ({}));
+      // JSON bo'lmagan javob ham bo'lishi mumkin (HTML xato sahifasi, boshqa server)
+      const text = await res.text();
+      let json: Record<string, unknown> = {};
+      try {
+        json = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+      } catch {
+        json = {};
+      }
       if (!res.ok) {
-        setError(json.error || "Xatolik yuz berdi");
+        setError(errorMessage(json, res.status));
         return null;
       }
-      return json as Record<string, unknown>;
+      return json;
+    } catch {
+      setError("Serverga ulanib bo'lmadi. Brauzer manzili va serverni tekshiring.");
+      return null;
     } finally {
       setBusy(false);
     }

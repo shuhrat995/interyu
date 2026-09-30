@@ -8,6 +8,7 @@ type Row = {
   candidateName: string;
   status: string;
   track: string | null;
+  stack: string | null;
   currentLevel: number;
   answered: number;
   startedAt: string;
@@ -101,7 +102,9 @@ export default function InterviewsPage() {
                   {r.antiCheatCount > 0 && <div className="text-xs text-warn">⚠ {r.antiCheatCount} anti-cheat</div>}
                 </td>
                 <td className="p-3 text-xs text-mut">
-                  {r.track === "backend" ? "Back-end" : r.track === "frontend" ? "Front-end" : "—"}
+                  {r.stack
+                    ? ({ javascript: "JavaScript", react: "React", typescript: "TypeScript", htmlcss: "HTML+CSS", python: "Python", nodejs: "Node.js", java: "Java", go: "Go" } as Record<string, string>)[r.stack] ?? r.stack
+                    : r.track === "backend" ? "Back-end" : r.track === "frontend" ? "Front-end" : "—"}
                 </td>
                 <td className="p-3 tabular-nums font-semibold">{r.score ?? "—"}</td>
                 <td className="p-3">{r.level ? <span className="badge border-acc/40 text-acc">{r.level}</span> : "—"}</td>

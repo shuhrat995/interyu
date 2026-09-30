@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { TRACKS, getTrack, type TrackSlug } from "@/lib/tracks";
+import { TRACKS, getTrack, stacksOf, getStack, type TrackSlug } from "@/lib/tracks";
 
 type Question = {
   id: string;
@@ -39,9 +39,13 @@ type Phase = "welcome" | "question" | "report";
 
 export default function InterviewPage() {
   const [phase, setPhase] = useState<Phase>("welcome");
-  const [welcomeStep, setWelcomeStep] = useState<"name" | "track">("name");
+  const [welcomeStep, setWelcomeStep] = useState<"name" | "track" | "stack">("name");
   const [name, setName] = useState("");
   const [track, setTrack] = useState<TrackSlug | null>(null);
+  const [stack, setStack] = useState<string | null>(null);
+  const [stackCounts, setStackCounts] = useState<Record<string, number>>({});
+  const [suggest, setSuggest] = useState("");
+  const [suggestSent, setSuggestSent] = useState(false);
   const [pendingTrack, setPendingTrack] = useState<TrackSlug | null>(null);
   const [interviewId, setInterviewId] = useState<string | null>(null);
   const [question, setQuestion] = useState<Question | null>(null);
@@ -51,14 +55,23 @@ export default function InterviewPage() {
   const [busy, setBusy] = useState(false);
   const [gradingSeconds, setGradingSeconds] = useState(0);
   const [error, setError] = useState("");
-  const [feedback, setFeedback] = useState<{ isCorrect: boolean; aiScore: number | null } | null>(null);
+  const [feedback, setFeedback] = useState<{ isCorrect: boolean; aiScore: number | null; skipped?: boolean } | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [level, setLevel] = useState(0);
   const [answered, setAnswered] = useState(0);
   const [pasted, setPasted] = useState(false);
   const [tabSwitches, setTabSwitches] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [pasteAttempts, setPasteAttempts] = useState(0);
+  const [copyAttempts, setCopyAttempts] = useState(0);
+  const [bulkBlocked, setBulkBlocked] = useState(false);
   const questionStart = useRef<number>(Date.now());
   const resumedRef = useRef(false);
+  const autoFiredRef = useRef(false);
+  const pauseStartRef = useRef<number>(0);
+  const keyStrokesRef = useRef(0);
+  const lastKeyRef = useRef(0);
+  const prevTextRef = useRef("");
 
   // Draft: yozilgan matn/tanlov localStorage'da saqlanadi (refresh himoyasi)
   const draftKey = interviewId && question ? `draft:${interviewId}:${question.id}` : null;
@@ -69,10 +82,14 @@ export default function InterviewPage() {
       const raw = localStorage.getItem(draftKey);
       if (raw) {
         const d = JSON.parse(raw) as { text?: string; selected?: number | null };
-        if (typeof d.text === "string") setText(d.text);
+        if (typeof d.text === "string") {
+          setText(d.text);
+          prevTextRef.current = d.text;
+        }
         if (typeof d.selected === "number") setSelected(d.selected);
       } else {
         setText("");
+        prevTextRef.current = "";
         setSelected(null);
       }
     } catch {
@@ -103,6 +120,37 @@ export default function InterviewPage() {
     }
   }
 
+  // Stack ro'yxati + savol sonlari (ommaviy API)
+  useEffect(() => {
+    if (phase !== "welcome" || welcomeStep !== "stack") return;
+    fetch("/api/stacks")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!j?.stacks) return;
+        const m: Record<string, number> = {};
+        for (const s of j.stacks as { slug: string; count: number }[]) m[s.slug] = s.count;
+        setStackCounts(m);
+      })
+      .catch(() => {});
+  }, [phase, welcomeStep]);
+
+  async function sendSuggestion() {
+    const t = suggest.trim().slice(0, 60);
+    if (t.length < 2) return;
+    try {
+      await fetch("/api/track", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: `/stack-taklif: ${t}`, kind: "view" })
+      });
+    } catch {
+      /* ignore */
+    }
+    setSuggestSent(true);
+    setSuggest("");
+    setTimeout(() => setSuggestSent(false), 3000);
+  }
+
   // Resume: localStorage'dagi sessiyani tiklash (TZ 5.3.8)
   useEffect(() => {
     if (resumedRef.current) return;
@@ -114,6 +162,7 @@ export default function InterviewPage() {
       .then((j) => {
         if (!j) return;
         if (j.track) setTrack(j.track as TrackSlug);
+        if (j.stack) setStack(j.stack as string);
         if (j.status === "in_progress" && j.question) {
           setInterviewId(saved);
           setQuestion(j.question);
@@ -157,13 +206,82 @@ export default function InterviewPage() {
     return () => clearInterval(t);
   }, [busy]);
 
+  function resetQuestionState() {
+    autoFiredRef.current = false;
+    setPaused(false);
+    setPasted(false);
+    setPasteAttempts(0);
+    setCopyAttempts(0);
+    setBulkBlocked(false);
+    keyStrokesRef.current = 0;
+    prevTextRef.current = "";
+  }
+
+  function togglePause() {
+    if (phase !== "question" || !question || busy) return;
+    if (!paused) {
+      setPaused(true);
+      pauseStartRef.current = Date.now();
+    } else {
+      // Pauza davomiyligini questionStart'ga qo'shamiz — vaqt to'xtaydi, timeSpent to'g'ri hisoblanadi
+      questionStart.current += Date.now() - pauseStartRef.current;
+      setPaused(false);
+    }
+  }
+
+  // === Anti-cheat: faqat qo'lda yozish (paste/copy/drop blok, 95%+ himoya) ===
+  function handleTextareaKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    lastKeyRef.current = Date.now();
+    keyStrokesRef.current += 1;
+    if ((e.ctrlKey || e.metaKey) && ["v", "c", "x"].includes(e.key.toLowerCase())) {
+      e.preventDefault();
+      if (e.key.toLowerCase() === "v") {
+        setPasted(true);
+        setPasteAttempts((n) => n + 1);
+      } else {
+        setCopyAttempts((n) => n + 1);
+      }
+    }
+  }
+
+  function handleTextChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const next = e.target.value;
+    // 5000 chegaradan ortig'i — kesib olish (server ham kesadi)
+    const capped = next.length > 5000 ? next.slice(0, 5000) : next;
+    const prev = prevTextRef.current;
+    const delta = capped.length - prev.length;
+    const now = Date.now();
+    // Bir anda 6+ belgi ko'payishi + oxirgi klavishdan 800ms o'tgan bo'lsa = paste/devtools/drop urinish
+    if (delta > 6 && now - lastKeyRef.current > 800 && prev.length > 0) {
+      setPasted(true);
+      setPasteAttempts((n) => n + 1);
+      setBulkBlocked(true);
+      setTimeout(() => setBulkBlocked(false), 2500);
+      return; // qiymatni qabul qilmaymiz — faqat yozishga ruxsat
+    }
+    // Birinchi yuklanishda (draft) katta matn bo'lsa ruxsat beramiz
+    if (delta > 6 && prev.length === 0 && capped.length > 0) {
+      prevTextRef.current = capped;
+      setText(capped);
+      return;
+    }
+    prevTextRef.current = capped;
+    setBulkBlocked(false);
+    setText(capped);
+  }
+
   const submit = useCallback(
-    async (auto: boolean) => {
+    async (auto: boolean, forceSkip = false) => {
       if (!interviewId || !question || busy) return;
-      if (!auto) {
+      if (paused && !forceSkip) return;
+      const shouldSkip =
+        forceSkip || (auto && (question.type === "mcq" ? selected === null : text.trim().length < 15));
+      if (!auto && !forceSkip) {
         if (question.type === "mcq" && selected === null) return;
         if (question.type === "written" && text.trim().length < 15) return;
       }
+      // Pauzada avtomatik yuborish bo'lmasligi kerak
+      if (auto && paused) return;
       setBusy(true);
       setError("");
       try {
@@ -173,16 +291,87 @@ export default function InterviewPage() {
           body: JSON.stringify({
             interviewId,
             questionId: question.id,
-            selectedIndex: question.type === "mcq" ? selected : null,
+            selectedIndex: shouldSkip ? null : question.type === "mcq" ? selected : null,
             answerText: question.type === "written" ? text : null,
+            skipped: shouldSkip,
             timeSpent: Math.floor((Date.now() - questionStart.current) / 1000),
             tabSwitches,
-            pasted
+            pasted: pasted || pasteAttempts > 0,
+            pasteAttempts,
+            copyAttempts,
+            keyStrokes: keyStrokesRef.current
           })
         });
         const j = await res.json();
         if (!res.ok) {
+          // Timeout'da 422 kelmasligi kerak (skipped yuboriladi), lekin kelib qolsa — skipga aylantiramiz
+          if (auto && (res.status === 422 || j.error?.includes("belgi") || j.error?.includes("bo'sh"))) {
+            autoFiredRef.current = true;
+            setError("");
+            // Bir marta skip sifatida qayta urinamiz
+            try {
+              const r2 = await fetch("/api/interview/answer", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  interviewId,
+                  questionId: question.id,
+                  selectedIndex: null,
+                  answerText: text || "[vaqt tugadi]",
+                  skipped: true,
+                  timeSpent: question.timeLimit,
+                  tabSwitches,
+                  pasted: pasted || pasteAttempts > 0,
+                  pasteAttempts,
+                  copyAttempts,
+                  keyStrokes: keyStrokesRef.current
+                })
+              });
+              const j2 = await r2.json();
+              if (!r2.ok) {
+                setError(j2.error || "Xatolik");
+                autoFiredRef.current = false;
+                return;
+              }
+              setFeedback(j2.evaluated);
+              setPasted(false);
+              setTabSwitches(0);
+              clearDraft();
+              setSelected(null);
+              setText("");
+              prevTextRef.current = "";
+              if (j2.next) {
+                setQuestion(j2.next);
+                setRemaining(j2.next.timeLimit);
+                questionStart.current = Date.now();
+                resetQuestionState();
+                if (j2.evaluated) setAnswered((n) => n + 1);
+                setTimeout(() => setFeedback(null), 2200);
+              } else {
+                setQuestion(null);
+                const fr = await fetch("/api/interview/finish", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ interviewId })
+                });
+                const fj = await fr.json();
+                if (fr.ok) {
+                  setReport(fj.report);
+                  localStorage.removeItem("ai_interview_session");
+                } else {
+                  setError(fj.error || "Hisobot xatosi");
+                }
+                setPhase("report");
+              }
+              return;
+            } catch {
+              setError("Serverga ulanib bo'lmadi");
+              autoFiredRef.current = false;
+              return;
+            }
+          }
           setError(j.error || "Xatolik");
+          autoFiredRef.current = false;
           return;
         }
         setFeedback(j.evaluated);
@@ -191,10 +380,12 @@ export default function InterviewPage() {
         clearDraft();
         setSelected(null);
         setText("");
+        prevTextRef.current = "";
         if (j.next) {
           setQuestion(j.next);
           setRemaining(j.next.timeLimit);
           questionStart.current = Date.now();
+          resetQuestionState();
           if (j.evaluated) setAnswered((n) => n + 1);
           setTimeout(() => setFeedback(null), 2200);
         } else {
@@ -218,23 +409,26 @@ export default function InterviewPage() {
         setBusy(false);
       }
     },
-    [interviewId, question, busy, selected, text, tabSwitches, pasted]
+    [interviewId, question, busy, selected, text, tabSwitches, pasted, pasteAttempts, copyAttempts, paused]
   );
 
-  // Timer: 0 bo'lsa avtomatik yuborish (TZ 5.3.3)
+  // Timer: 0 bo'lsa avtomatik yuborish/o'tkazish — xatoliksiz (pauzada to'xtaydi)
   useEffect(() => {
-    if (phase !== "question" || !question) return;
+    if (phase !== "question" || !question || paused) return;
     if (remaining <= 0) {
-      submit(true);
+      if (!autoFiredRef.current) {
+        autoFiredRef.current = true;
+        submit(true);
+      }
       return;
     }
     const t = setTimeout(() => setRemaining((r) => r - 1), 1000);
     return () => clearTimeout(t);
-  }, [phase, question, remaining, submit]);
+  }, [phase, question, remaining, submit, paused]);
 
-  // Klaviatura: 1-5 variant, ⌘/Ctrl+Enter yuborish (TZ 5.3.2)
+  // Klaviatura: 1-5 variant, ⌘/Ctrl+Enter yuborish (TZ 5.3.2) — pauzada ishlamaydi
   useEffect(() => {
-    if (phase !== "question" || !question) return;
+    if (phase !== "question" || !question || paused) return;
     function onKey(e: KeyboardEvent) {
       if (!question) return;
       if (question.type === "mcq" && /^[1-5]$/.test(e.key)) {
@@ -246,13 +440,15 @@ export default function InterviewPage() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [phase, question, submit]);
+  }, [phase, question, submit, paused]);
 
-  async function start(trackSlug: TrackSlug) {
+  async function start(stackSlug: string) {
     if (name.trim().length < 2) {
       setWelcomeStep("name");
       return;
     }
+    const st = getStack(stackSlug);
+    const trackSlug = (st?.track ?? track ?? "frontend") as TrackSlug;
     setPendingTrack(trackSlug);
     setBusy(true);
     setError("");
@@ -260,12 +456,13 @@ export default function InterviewPage() {
       const res = await fetch("/api/interview/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), track: trackSlug })
+        body: JSON.stringify({ name: name.trim(), track: trackSlug, stack: stackSlug })
       });
       let j: {
         error?: string;
         interviewId: string;
         track?: TrackSlug;
+        stack?: string | null;
         question: NonNullable<typeof question>;
       };
       try {
@@ -281,10 +478,15 @@ export default function InterviewPage() {
       localStorage.setItem("ai_interview_session", j.interviewId);
       setInterviewId(j.interviewId);
       setTrack(j.track ?? trackSlug);
+      setStack(j.stack ?? stackSlug);
       setQuestion(j.question);
       setRemaining(j.question.timeLimit);
       setAnswered(0);
       setLevel(0);
+      setText("");
+      setSelected(null);
+      setFeedback(null);
+      resetQuestionState();
       questionStart.current = Date.now();
       setPhase("question");
     } catch {
@@ -307,8 +509,10 @@ export default function InterviewPage() {
             <h1 className="text-2xl font-semibold">O&apos;z darajangizni aniqlang</h1>
             <p className="text-sm text-mut mt-2">
               {welcomeStep === "name"
-                ? "12 savol · adaptiv qiyinlik · AI baholash · o'tkazib yuborish mumkin emas"
-                : "Savollar qaysi yo'nalishdan bo'lsin?"}
+                ? "12 savol · adaptiv qiyinlik · AI baholash · o'tkazish va pauza mumkin"
+                : welcomeStep === "track"
+                  ? "Qaysi yo'nalishda ishlaysiz?"
+                  : "Qaysi tilda savollar berilsin?"}
             </p>
           </div>
 
@@ -342,9 +546,9 @@ export default function InterviewPage() {
               >
                 Davom etish →
               </button>
-              <p className="text-xs text-mut text-center">Savolga kirgach vaqt hisoblanadi — tayyor bo&apos;ling!</p>
+              <p className="text-xs text-mut text-center">Savolga kirgach vaqt hisoblanadi — pauza bossangiz vaqt to&apos;xtaydi, maydon bloklanadi. Vaqt tugasa savol avtomatik o&apos;tkaziladi (xatoliksiz).</p>
             </form>
-          ) : (
+          ) : welcomeStep === "track" ? (
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs text-mut">
                 <span>👤 {name.trim()}</span>
@@ -356,7 +560,10 @@ export default function InterviewPage() {
                 <button
                   key={t.slug}
                   type="button"
-                  onClick={() => start(t.slug)}
+                  onClick={() => {
+                    setTrack(t.slug);
+                    setWelcomeStep("stack");
+                  }}
                   disabled={busy}
                   className="w-full text-left card p-4 hover:border-acc transition-colors disabled:opacity-60"
                 >
@@ -366,15 +573,72 @@ export default function InterviewPage() {
                       <div className="font-semibold">{t.label}</div>
                       <div className="text-xs text-mut mt-0.5">{t.description}</div>
                     </div>
-                    <span className="text-acc text-sm">
-                      {pendingTrack === t.slug ? "Boshlanmoqda..." : "Boshlash →"}
-                    </span>
+                    <span className="text-acc text-sm">Tanlash →</span>
                   </div>
                 </button>
               ))}
               <p className="text-xs text-mut text-center">
-                Yo&apos;nalish faqat savollar tanloviga ta&apos;sir qiladi — daraja baribir adaptiv aniqlanadi.
+                Keyingi qadamda aynan qaysi dasturlash tilida savollar berilishini tanlaysiz.
               </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-mut">
+                <span>👤 {name.trim()} · {track ? getTrack(track).label : ""}</span>
+                <button type="button" className="hover:text-acc" onClick={() => setWelcomeStep("track")}>
+                  ← yo&apos;nalish
+                </button>
+              </div>
+              {stacksOf(track).map((s) => (
+                <button
+                  key={s.slug}
+                  type="button"
+                  onClick={() => start(s.slug)}
+                  disabled={busy}
+                  className="w-full text-left card p-4 hover:border-acc transition-colors disabled:opacity-60"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl" aria-hidden>{s.icon}</span>
+                    <div className="flex-1">
+                      <div className="font-semibold">
+                        {s.label}
+                        {stackCounts[s.slug] !== undefined && (
+                          <span className="ml-2 text-xs font-normal text-mut">· {stackCounts[s.slug]} savol</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-mut mt-0.5">{s.description}</div>
+                    </div>
+                    <span className="text-acc text-sm">
+                      {pendingTrack === s.track && busy ? "Boshlanmoqda..." : "Boshlash →"}
+                    </span>
+                  </div>
+                </button>
+              ))}
+              <div className="rounded-md border border-line p-3 space-y-2">
+                <p className="text-xs text-mut">🔎 Kerakli til yo&apos;qmi? Yozing — ko&apos;p so&apos;ralsa keyingi bo&apos;lib qo&apos;shamiz:</p>
+                {suggestSent ? (
+                  <p className="text-xs text-ok">✓ Qabul qilindi, rahmat!</p>
+                ) : (
+                  <form
+                    className="flex gap-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      sendSuggestion();
+                    }}
+                  >
+                    <input
+                      className="flex-1 text-sm py-2"
+                      placeholder="Masalan: PHP, C#, Rust..."
+                      value={suggest}
+                      onChange={(e) => setSuggest(e.target.value)}
+                      maxLength={60}
+                    />
+                    <button type="submit" className="text-sm border border-line rounded-md px-3 hover:border-acc" disabled={suggest.trim().length < 2}>
+                      Yuborish
+                    </button>
+                  </form>
+                )}
+              </div>
             </div>
           )}
 
@@ -396,7 +660,11 @@ export default function InterviewPage() {
       <main className="min-h-screen p-4 md:p-8 max-w-2xl mx-auto space-y-4">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold">Intervyu yakuni</h1>
-          {track && <span className="badge border-acc/40 text-acc">{getTrack(track).label}</span>}
+          {stack && getStack(stack) ? (
+            <span className="badge border-acc/40 text-acc">{getStack(stack)?.label}</span>
+          ) : (
+            track && <span className="badge border-acc/40 text-acc">{getTrack(track).label}</span>
+          )}
         </div>
 
         <div className="card p-5 flex items-center gap-4">
@@ -520,6 +788,7 @@ export default function InterviewPage() {
               setWelcomeStep("name");
               setReport(null);
               setTrack(null);
+              setStack(null);
               setName("");
             }}
           >
@@ -549,7 +818,11 @@ export default function InterviewPage() {
         <div className="flex justify-between text-xs text-mut mb-1">
           <span>
             Savol {question.index} / {question.total}
-            {track && <span className="ml-2 badge border-line text-mut">{getTrack(track).label}</span>}
+            {stack && getStack(stack) ? (
+              <span className="ml-2 badge border-line text-mut">{getStack(stack)?.label}</span>
+            ) : (
+              track && <span className="ml-2 badge border-line text-mut">{getTrack(track).label}</span>
+            )}
           </span>
           <span>Daraja {level}/5 · {answered} javob berilgan</span>
         </div>
@@ -558,20 +831,49 @@ export default function InterviewPage() {
         </div>
       </div>
 
-      <div className="card p-5 space-y-4">
-        <div className="flex items-center justify-between">
+      <div
+        className="card p-5 space-y-4"
+        onCopy={(e) => {
+          // Savol matnini ko'chirib olishni qiyinlashtirish (anti-cheat)
+          const t = window.getSelection()?.toString() ?? "";
+          if (t.length > 20) {
+            setCopyAttempts((n) => n + 1);
+          }
+        }}
+      >
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <span className="badge border-line text-mut">{question.type === "mcq" ? "MCQ" : "Yozma"} · {question.difficulty}/5</span>
-          <span className={`text-sm tabular-nums ${remaining <= 10 ? "text-bad font-semibold" : "text-mut"}`} role="timer">
-            ⏱ {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className={`text-sm tabular-nums ${remaining <= 10 ? "text-bad font-semibold" : "text-mut"}`} role="timer">
+              ⏱ {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}
+              {paused && <span className="ml-1 text-warn font-semibold">(to'xtatilgan)</span>}
+            </span>
+            <button
+              type="button"
+              onClick={togglePause}
+              disabled={busy}
+              className="text-xs border border-line rounded-md px-2.5 py-1.5 hover:border-acc disabled:opacity-50"
+              title={paused ? "Davom etish — vaqt yuradi, maydon ochiladi" : "Pauza — vaqt to'xtaydi, maydon bloklanadi"}
+            >
+              {paused ? "▶ Davom etish" : "⏸ Pauza"}
+            </button>
+          </div>
         </div>
 
-        <h2 className="text-lg font-medium whitespace-pre-wrap">{question.text}</h2>
+        <h2 className="text-lg font-medium whitespace-pre-wrap select-none" onCopy={(e) => e.preventDefault()}>
+          {question.text}
+        </h2>
+
+        {paused && (
+          <div className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">
+            ⏸ Pauza yoqilgan — vaqt to&apos;xtadi, javob maydoni bloklandi. Davom etish uchun &ldquo;▶ Davom etish&rdquo; ni bosing.
+          </div>
+        )}
 
         {feedback && (
-          <div className={`rounded-md border px-3 py-2 text-sm ${feedback.isCorrect ? "border-ok/40 bg-ok/10 text-ok" : "border-warn/40 bg-warn/10 text-warn"}`}>
-            {feedback.isCorrect ? "✅ To'g'ri" : "❌ Yetarli emas"}
-            {feedback.aiScore !== null && ` — AI ball: ${feedback.aiScore}/100`}
+          <div className={`rounded-md border px-3 py-2 text-sm ${feedback.skipped ? "border-line bg-panel2 text-mut" : feedback.isCorrect ? "border-ok/40 bg-ok/10 text-ok" : "border-warn/40 bg-warn/10 text-warn"}`}>
+            {feedback.skipped ? "⏭ O'tkazib yuborildi (0 ball)" : feedback.isCorrect ? "✅ To'g'ri" : "❌ Yetarli emas"}
+            {!feedback.skipped && feedback.aiScore !== null && ` — AI ball: ${feedback.aiScore}/100`}
           </div>
         )}
 
@@ -583,8 +885,9 @@ export default function InterviewPage() {
                 type="button"
                 role="radio"
                 aria-checked={selected === i}
+                disabled={paused || busy}
                 onClick={() => setSelected(i)}
-                className={`w-full text-left px-4 py-3 rounded-md border text-sm transition-colors ${
+                className={`w-full text-left px-4 py-3 rounded-md border text-sm transition-colors disabled:opacity-60 ${
                   selected === i ? "border-acc bg-acc/15" : "border-line hover:bg-panel2"
                 }`}
               >
@@ -595,38 +898,80 @@ export default function InterviewPage() {
         ) : (
           <div>
             <textarea
-              className="w-full text-base leading-relaxed min-h-[220px] py-3"
+              className="w-full text-base leading-relaxed min-h-[220px] py-3 disabled:opacity-60"
               style={{ fontSize: "16px" }}
               rows={9}
-              placeholder="Javobingizni shu yerga yozing... (kamida 15 belgi)"
+              placeholder={paused ? "Pauzada yozish bloklangan — davom eting..." : "Javobingizni shu yerga FAQAT QO'LDA yozing... (kamida 15 belgi, ko'chirib joylash bloklangan)"}
               value={text}
-              onChange={(e) => setText(e.target.value)}
-              onPaste={() => setPasted(true)}
+              onChange={handleTextChange}
+              onKeyDown={handleTextareaKeyDown}
+              onPaste={(e) => {
+                e.preventDefault();
+                setPasted(true);
+                setPasteAttempts((n) => n + 1);
+              }}
+              onCopy={(e) => {
+                e.preventDefault();
+                setCopyAttempts((n) => n + 1);
+              }}
+              onCut={(e) => {
+                e.preventDefault();
+                setCopyAttempts((n) => n + 1);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setPasted(true);
+                setPasteAttempts((n) => n + 1);
+              }}
+              onDragOver={(e) => e.preventDefault()}
+              onContextMenu={(e) => e.preventDefault()}
               maxLength={5000}
-              autoFocus
+              autoFocus={!paused}
+              disabled={paused || busy}
               aria-label="Javobingiz"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
             />
-            <div className="flex justify-between text-xs text-mut mt-1.5">
+            <div className="flex justify-between text-xs text-mut mt-1.5 flex-wrap gap-1">
               <span>
                 {text.trim().length < 15 ? <span className="text-warn">Yana {(15 - text.trim().length)} belgi kerak</span> : <span className="text-ok">✓ Javob tayyor</span>}
-                {pasted && <span className="text-warn ml-2">Paste ishlatilgan (loglandi)</span>}
+                {(pasted || pasteAttempts > 0) && <span className="text-warn ml-2">⛔ Ko&apos;chirib joylash bloklangan ({pasteAttempts} urinish, loglandi)</span>}
+                {bulkBlocked && <span className="text-bad ml-2">Faqat qo&apos;lda yozing — ommaviy joylash rad etildi!</span>}
+                {copyAttempts > 0 && <span className="text-warn ml-2">Nusxa urinish: {copyAttempts}</span>}
                 {tabSwitches > 0 && <span className="text-warn ml-2">Tab almashgan: {tabSwitches}</span>}
               </span>
               <span className="tabular-nums">{text.trim().length} / 5000</span>
             </div>
+            <p className="text-[11px] text-mut mt-1">🛡 Himoya: paste / drop / Ctrl+V / o&apos;ng klik / devtools orqali ommaviy joylash bloklangan. Faqat klaviatura bilan yozish mumkin.</p>
           </div>
         )}
 
         {error && <div className="rounded-md border border-bad/40 bg-bad/10 px-3 py-2 text-sm text-bad">{error}</div>}
 
-        <div className="flex items-center justify-between pt-2 border-t border-line">
+        <div className="flex items-center justify-between pt-2 border-t border-line gap-2 flex-wrap">
           <span className="text-xs text-mut hidden md:block">
             {question.type === "mcq" ? "1–5 raqamlar bilan tanlang" : "⌘/Ctrl+Enter bilan yuboring"}
           </span>
-          <button className="btn-primary text-base px-6 py-2.5" disabled={!canSubmit || busy} onClick={() => submit(false)}>
-            {busy ? gradingLabel : isLast ? "✓ Yakunlash" : "Keyingisi →"}
-          </button>
+          <div className="flex gap-2 ml-auto">
+            <button
+              type="button"
+              className="text-base px-4 py-2.5 border border-line rounded-md hover:border-warn disabled:opacity-50"
+              disabled={busy || paused}
+              onClick={() => submit(false, true)}
+              title="Javobsiz keyingi savolga o'tish (0 ball)"
+            >
+              ⏭ O&apos;tkazish
+            </button>
+            <button className="btn-primary text-base px-6 py-2.5 disabled:opacity-50" disabled={!canSubmit || busy || paused} onClick={() => submit(false)}>
+              {busy ? gradingLabel : isLast ? "✓ Yakunlash" : "Keyingisi →"}
+            </button>
+          </div>
         </div>
+        {remaining <= 15 && !paused && (
+          <p className="text-xs text-warn text-center">⏳ Vaqt tugasa savol avtomatik o&apos;tkaziladi — xatolik bermaydi.</p>
+        )}
         {busy && !isLast && (
           <p className="text-xs text-mut text-center -mt-2">
             {question.type === "written"

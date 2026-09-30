@@ -60,6 +60,7 @@ type Detail = {
     candidateName: string;
     status: string;
     track?: string | null;
+    stack?: string | null;
     currentLevel: number;
     startedAt: string;
     finishedAt: string | null;
@@ -123,7 +124,11 @@ export default function InterviewDetailPage() {
               <>
                 {" · "}
                 <span className="badge border-acc/40 text-acc">
-                  {interview.track === "backend" ? "Back-end" : "Front-end"}
+                  {interview.stack
+                    ? ({ javascript: "JavaScript", react: "React", typescript: "TypeScript", htmlcss: "HTML+CSS", python: "Python", nodejs: "Node.js", java: "Java", go: "Go" } as Record<string, string>)[interview.stack] ?? interview.stack
+                    : interview.track === "backend"
+                      ? "Back-end"
+                      : "Front-end"}
                 </span>
               </>
             )}

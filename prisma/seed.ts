@@ -146,17 +146,25 @@ async function main() {
     qn++;
   }
 
-  // 2 ta aktiv prompt (TZ: kamida 2 ta prompt tayyor)
+  // 2 ta aktiv prompt (TZ: kamida 2 ta prompt tayyor) — v3: adolatli baholash qoidalari bilan
   await prisma.promptVersion.create({
     data: {
       kind: "evaluate_written",
-      version: 2,
+      version: 3,
       isActive: true,
-      template: `Siz tajribali texnik intervyuersiz. Quyidagi savol va nomzod javobini rubric asosida baholang.
+      template: `Siz tajribali texnik intervyuersiz. Quyidagi savol va nomzod javobini rubric asosida ADOLATLI baholang.
 Mavzu: {{topic}}. Daraja: {{difficulty}}/5. Rubric: """{{rubric}}"""
 Kutilgan kalit tushunchalar: {{keywords}}
 Savol: """{{question}}"""
 Nomzod javobi: """{{answer}}"""
+Baholash qoidalari (majburiy, adolatli bo'ling):
+- 0-15: bo'sh yoki 1-2 so'zli, mavzuga aloqasiz javob.
+- 40-59: qisman to'g'ri — asosiy g'oya bor, lekin 1-2 muhim tushuncha yetishmaydi.
+- 60-74: yaxshi — rubric'ning yarmi+ qamrab olingan, kichik kamchilik bor.
+- 75-89: kuchli — deyarli to'liq, faqat chuqurlik/detail yetishmaydi.
+- 90-100: a'lo — to'liq, aniq, misolli.
+- O'zbekcha/inglizcha sinonimlarni bir xil deb qabul qiling (komponent=component, sikl=loop, solishtirish=compare, qayta ishlatish=reusable va h.k.). Imlo/transliteratsiya xatosi uchun 5 balldan ko'p ayirmang.
+- Javob qisqa bo'lsa ham g'oya to'g'ri bo'lsa kamida 55 bering. Faqat kalit so'z sanash bilan baholamang — ma'noga qarang.
 Javobni qisqa baholang: har ro'yxatda maksimum 3 element, interviewer_note 1-2 gap.
 Faqat JSON qaytaring: {"score": 0-100, "verdict": "kuchli|o'rtacha|zaif", "strengths": ["..."], "gaps": ["..."], "misconceptions": ["..."], "interviewer_note": "...", "followup": "savol yoki null"}`
     }

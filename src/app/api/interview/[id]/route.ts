@@ -17,14 +17,21 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   const answered = interview.answers.length;
 
   if (interview.status !== "in_progress") {
+    let report = null;
+    try {
+      report = interview.aiReportJson ? JSON.parse(interview.aiReportJson) : null;
+    } catch {
+      report = null;
+    }
     return NextResponse.json({
       status: interview.status,
       candidateName: interview.candidateName,
       track: interview.track,
+      stack: interview.stack ?? null,
       answered,
       total: settings.totalQuestions,
       question: null,
-      report: interview.aiReportJson ? JSON.parse(interview.aiReportJson) : null
+      report
     });
   }
 
@@ -41,6 +48,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     status: interview.status,
     candidateName: interview.candidateName,
     track: interview.track,
+    stack: interview.stack ?? null,
     currentLevel: interview.currentLevel,
     answered,
     total: settings.totalQuestions,

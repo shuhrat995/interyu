@@ -34,7 +34,7 @@ const FEATURES = [
 ];
 
 const STEPS = [
-  { n: "1", title: "Ism va yo'nalishni tanlang", text: "Front-end yoki back-end — savollar shunga qarab tanlanadi. Ro'yxatdan o'tish shart emas." },
+  { n: "1", title: "Ism, yo'nalish va tilni tanlang", text: "Front-end yoki back-end, keyin aniq til — JavaScript, React, Python, Node.js, Java, Go. Savollar shunga qarab tanlanadi. Ro'yxatdan o'tish shart emas." },
   { n: "2", title: "Savollarga javob bering", text: "Test va yozma savollar aralash — daraja avtomatik moslashadi." },
   { n: "3", title: "Natijani oling", text: "Ball, daraja, kuchli va zaif tomonlaringiz hamda aniq focus rejasi bilan hisobot." }
 ];
