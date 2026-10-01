@@ -37,6 +37,12 @@ type Report = {
 
 type Phase = "welcome" | "question" | "report";
 
+type QStatus = "correct" | "wrong" | "skipped";
+
+function statusOf(ev: { isCorrect: boolean; skipped?: boolean }): QStatus {
+  return ev.skipped ? "skipped" : ev.isCorrect ? "correct" : "wrong";
+}
+
 export default function InterviewPage() {
   const [phase, setPhase] = useState<Phase>("welcome");
   const [welcomeStep, setWelcomeStep] = useState<"name" | "track" | "stack">("name");
@@ -59,6 +65,9 @@ export default function InterviewPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [level, setLevel] = useState(0);
   const [answered, setAnswered] = useState(0);
+  // Savollar xaritasi: {index: status} — burchakdagi navigator + hisobot uchun
+  const [history, setHistory] = useState<Record<number, QStatus>>({});
+  const [totalQ, setTotalQ] = useState(12);
   const [pasted, setPasted] = useState(false);
   const [tabSwitches, setTabSwitches] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -120,6 +129,63 @@ export default function InterviewPage() {
     }
   }
 
+  // Xarita: bitta savol natijasini yozish + localStorage'da saqlash (refresh himoyasi)
+  const saveStatus = useCallback(
+    (idx: number, ev: { isCorrect: boolean; skipped?: boolean }) => {
+      const st = statusOf(ev);
+      setHistory((prev) => {
+        const nx = { ...prev, [idx]: st };
+        try {
+          if (interviewId) localStorage.setItem(`history:${interviewId}`, JSON.stringify(nx));
+        } catch {
+          /* ignore */
+        }
+        return nx;
+      });
+    },
+    [interviewId]
+  );
+
+  function loadLocalHistory(id: string): Record<number, QStatus> {
+    try {
+      const raw = localStorage.getItem(`history:${id}`);
+      if (!raw) return {};
+      const d = JSON.parse(raw) as Record<string, string>;
+      const out: Record<number, QStatus> = {};
+      for (const [k, v] of Object.entries(d)) {
+        if (v === "correct" || v === "wrong" || v === "skipped") out[Number(k)] = v;
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
+  // 1-savolda "Orqaga (tillar)": sessiyani tozalab til tanlashga qaytish
+  function backToStacks() {
+    if (!interviewId || !question || busy || answered > 0) return;
+    try {
+      localStorage.removeItem("ai_interview_session");
+      if (draftKey) localStorage.removeItem(draftKey);
+      localStorage.removeItem(`history:${interviewId}`);
+    } catch {
+      /* ignore */
+    }
+    setInterviewId(null);
+    setQuestion(null);
+    setHistory({});
+    setSelected(null);
+    setText("");
+    prevTextRef.current = "";
+    setAnswered(0);
+    setLevel(0);
+    setFeedback(null);
+    setError("");
+    resetQuestionState();
+    setPhase("welcome");
+    setWelcomeStep("stack");
+  }
+
   // Stack ro'yxati + savol sonlari (ommaviy API)
   useEffect(() => {
     if (phase !== "welcome" || welcomeStep !== "stack") return;
@@ -163,6 +229,16 @@ export default function InterviewPage() {
         if (!j) return;
         if (j.track) setTrack(j.track as TrackSlug);
         if (j.stack) setStack(j.stack as string);
+        if (typeof j.total === "number") setTotalQ(j.total);
+        // Xarita tarixini tiklash: server > localStorage
+        const serverHist: Record<number, QStatus> = {};
+        if (Array.isArray(j.answers)) {
+          for (const a of j.answers as { index: number; isCorrect: boolean | null; skipped: boolean }[]) {
+            serverHist[a.index] = a.skipped ? "skipped" : a.isCorrect ? "correct" : "wrong";
+          }
+        }
+        const merged = { ...loadLocalHistory(saved), ...serverHist };
+        if (Object.keys(merged).length > 0) setHistory(merged);
         if (j.status === "in_progress" && j.question) {
           setInterviewId(saved);
           setQuestion(j.question);
@@ -334,6 +410,7 @@ export default function InterviewPage() {
                 return;
               }
               setFeedback(j2.evaluated);
+              saveStatus(question.index, j2.evaluated);
               setPasted(false);
               setTabSwitches(0);
               clearDraft();
@@ -375,6 +452,7 @@ export default function InterviewPage() {
           return;
         }
         setFeedback(j.evaluated);
+        saveStatus(question.index, j.evaluated);
         setPasted(false);
         setTabSwitches(0);
         clearDraft();
@@ -409,7 +487,7 @@ export default function InterviewPage() {
         setBusy(false);
       }
     },
-    [interviewId, question, busy, selected, text, tabSwitches, pasted, pasteAttempts, copyAttempts, paused]
+    [interviewId, question, busy, selected, text, tabSwitches, pasted, pasteAttempts, copyAttempts, paused, saveStatus]
   );
 
   // Timer: 0 bo'lsa avtomatik yuborish/o'tkazish — xatoliksiz (pauzada to'xtaydi)
@@ -483,6 +561,8 @@ export default function InterviewPage() {
       setRemaining(j.question.timeLimit);
       setAnswered(0);
       setLevel(0);
+      setHistory({});
+      setTotalQ(j.question.total);
       setText("");
       setSelected(null);
       setFeedback(null);
@@ -656,6 +736,11 @@ export default function InterviewPage() {
     const focus = report.focus_areas?.length ? report.focus_areas : (report.topics_to_improve ?? []);
     const sevClass = (s?: string) =>
       s === "yuqori" ? "border-bad/50 text-bad" : s === "o'rta" ? "border-warn/50 text-warn" : "border-line text-mut";
+    // Tugatgach e'lon: to'g'ri/xato/o'tkazildi hisobi
+    const histVals = Object.values(history);
+    const doneC = histVals.filter((v) => v === "correct").length;
+    const doneW = histVals.filter((v) => v === "wrong").length;
+    const doneS = histVals.filter((v) => v === "skipped").length;
     return (
       <main className="min-h-screen p-4 md:p-8 max-w-2xl mx-auto space-y-4">
         <div className="flex items-center justify-between">
@@ -666,6 +751,41 @@ export default function InterviewPage() {
             track && <span className="badge border-acc/40 text-acc">{getTrack(track)?.label ?? track}</span>
           )}
         </div>
+
+        {histVals.length > 0 && (
+          <div className="card p-4">
+            <p className="text-sm font-medium">
+              🎉 Tugatdingiz! <span className="text-ok">{doneC} to'g'ri</span>
+              {" · "}
+              <span className="text-bad">{doneW} xato</span>
+              {" · "}
+              <span className="text-warn">{doneS} o'tkazildi</span>
+            </p>
+            <div className="flex flex-wrap gap-1 mt-2" aria-label="Savollar xaritasi">
+              {Array.from({ length: Math.max(totalQ, ...Object.keys(history).map(Number)) }, (_, i) => {
+                const n = i + 1;
+                const st = history[n];
+                const cls =
+                  st === "correct"
+                    ? "bg-ok/20 border-ok/60 text-ok"
+                    : st === "wrong"
+                      ? "bg-bad/20 border-bad/60 text-bad"
+                      : st === "skipped"
+                        ? "bg-warn/20 border-warn/60 text-warn"
+                        : "border-line text-mut";
+                return (
+                  <span
+                    key={n}
+                    title={`${n}-savol${st === "correct" ? ": to'g'ri" : st === "wrong" ? ": xato" : st === "skipped" ? ": o'tkazildi" : ""}`}
+                    className={`w-7 h-7 text-xs tabular-nums flex items-center justify-center rounded-md border ${cls}`}
+                  >
+                    {n}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="card p-5 flex items-center gap-4">
           <div className="text-4xl font-bold tabular-nums">{report.overall_score ?? "—"}</div>
@@ -784,9 +904,15 @@ export default function InterviewPage() {
             className="btn-primary"
             onClick={() => {
               localStorage.removeItem("ai_interview_session");
+              try {
+                if (interviewId) localStorage.removeItem(`history:${interviewId}`);
+              } catch {
+                /* ignore */
+              }
               setPhase("welcome");
               setWelcomeStep("name");
               setReport(null);
+              setHistory({});
               setTrack(null);
               setStack(null);
               setName("");
@@ -813,6 +939,54 @@ export default function InterviewPage() {
 
   return (
     <main className="min-h-screen p-4 md:p-8 max-w-2xl mx-auto">
+      {/* Savollar xaritasi — ekran burchagida: yashil=to'g'ri, qizil=xato, sariq=o'tkazildi */}
+      <nav aria-label="Savollar xaritasi" className="fixed bottom-4 right-4 z-30 card p-2 w-[148px] shadow-lg">
+        <div className="text-[10px] text-mut px-1 pb-1.5 flex justify-between tabular-nums">
+          <span>Savollar</span>
+          <span>{answered}/{question.total}</span>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {Array.from({ length: question.total }, (_, i) => {
+            const n = i + 1;
+            const st = history[n];
+            const isCur = n === question.index;
+            const cls =
+              st === "correct"
+                ? "bg-ok/20 border-ok/60 text-ok"
+                : st === "wrong"
+                  ? "bg-bad/20 border-bad/60 text-bad"
+                  : st === "skipped"
+                    ? "bg-warn/20 border-warn/60 text-warn"
+                    : isCur
+                      ? "border-acc text-acc"
+                      : "border-line text-mut";
+            const title =
+              st === "correct"
+                ? `${n}-savol: to'g'ri`
+                : st === "wrong"
+                  ? `${n}-savol: xato`
+                  : st === "skipped"
+                    ? `${n}-savol: o'tkazildi`
+                    : isCur
+                      ? `${n}-savol: hozirgi`
+                      : `${n}-savol`;
+            return (
+              <span
+                key={n}
+                title={title}
+                className={`w-7 h-7 text-xs tabular-nums flex items-center justify-center rounded-md border ${cls} ${isCur ? "ring-1 ring-acc" : ""}`}
+              >
+                {n}
+              </span>
+            );
+          })}
+        </div>
+        <div className="flex gap-2 px-1 pt-1.5 text-[9px] text-mut">
+          <span className="flex items-center gap-1"><i className="w-2 h-2 rounded-sm bg-ok inline-block" />to'g'ri</span>
+          <span className="flex items-center gap-1"><i className="w-2 h-2 rounded-sm bg-bad inline-block" />xato</span>
+          <span className="flex items-center gap-1"><i className="w-2 h-2 rounded-sm bg-warn inline-block" />o'tkazildi</span>
+        </div>
+      </nav>
       {/* Progress (TZ 5.3.2) */}
       <div className="mb-4">
         <div className="flex justify-between text-xs text-mut mb-1">
@@ -955,6 +1129,17 @@ export default function InterviewPage() {
             {question.type === "mcq" ? "1–5 raqamlar bilan tanlang" : "⌘/Ctrl+Enter bilan yuboring"}
           </span>
           <div className="flex gap-2 ml-auto">
+            {question.index === 1 && (
+              <button
+                type="button"
+                className="text-base px-4 py-2.5 border border-line rounded-md hover:border-acc disabled:opacity-50"
+                disabled={busy || paused || answered > 0}
+                onClick={backToStacks}
+                title="Til tanlashga qaytish"
+              >
+                ← Tillar
+              </button>
+            )}
             <button
               type="button"
               className="text-base px-4 py-2.5 border border-line rounded-md hover:border-warn disabled:opacity-50"
